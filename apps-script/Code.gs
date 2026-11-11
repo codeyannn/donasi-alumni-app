@@ -6,9 +6,6 @@
 
 /**
  * Handles HTTP POST requests.
- * Routes:
- * - Bank Webhook: ?token=WEBHOOK_SECRET_TOKEN
- * - API actions: action=register, submit_verification, review_verification, create_intent, resolve_queue
  */
 function doPost(e) {
   try {
@@ -74,12 +71,16 @@ function doPost(e) {
       return jsonResponse_(res);
     }
 
+    if (pathAction === 'simulate_payment') {
+      const res = simulateIntentPayment(idToken, body.intent_id);
+      return jsonResponse_(res);
+    }
+
     if (pathAction === 'resolve_queue') {
       const res = resolveReviewQueueItem(idToken, body.queue_id, body.target_ref_code);
       return jsonResponse_(res);
     }
 
-    // If unauthorized or unknown action
     return jsonResponse_({ status: 'error', message: 'Unauthorized or unknown POST action: ' + pathAction }, 401);
 
   } catch (err) {
@@ -89,13 +90,6 @@ function doPost(e) {
 
 /**
  * Handles HTTP GET requests.
- * Routes:
- * - action=health
- * - action=public_summary
- * - action=my_donations (requires id_token)
- * - action=admin_verifications (requires admin id_token)
- * - action=admin_queue (requires admin id_token)
- * - action=admin_insights (requires admin id_token)
  */
 function doGet(e) {
   try {
@@ -117,6 +111,10 @@ function doGet(e) {
 
     if (action === 'my_donations') {
       return jsonResponse_(getMyDonations(idToken));
+    }
+
+    if (action === 'check_intent') {
+      return jsonResponse_(checkIntentStatus(idToken, params.intent_id));
     }
 
     if (action === 'admin_verifications') {
@@ -180,4 +178,3 @@ function getKeywordDictionary_() {
   }
   return list;
 }
-

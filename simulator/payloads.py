@@ -1,9 +1,9 @@
 """
 payloads.py
 Generates realistic multi-bank donation webhook payloads with support for:
+- Virtual Account payment narration (e.g., PEMBAYARAN VA 895081000471)
 - Embedded reference codes (--ref A000471 or G000012)
 - Multi-bank narrations (BSI, Mandiri, BCA, BNI, BRI)
-- Specific amount and program tags
 """
 
 import random
@@ -11,6 +11,14 @@ import uuid
 from datetime import datetime, timezone
 
 SUPPORTED_BANKS = ["BSI", "MANDIRI", "BCA", "BNI", "BRI"]
+BANK_VA_PREFIXES = {
+    "BCA": "39012",
+    "MANDIRI": "89508",
+    "BRI": "88810",
+    "BNI": "98814",
+    "BSI": "90019"
+}
+
 SAMPLE_DONORS = [
     "Ahmad Rizki", "Siti Nurhaliza", "Muhammad Rafi",
     "Farhan Aditya", "Dimas Anugrah", "Nabila Putri"
@@ -18,13 +26,21 @@ SAMPLE_DONORS = [
 SAMPLE_TAGS = ["BEASISWA", "PRESTASI", "WAKAF", "ZAKAT", "INFAQ", ""]
 
 
-def build_bank_description(bank: str, donor: str, tag: str = "", ref_code: str = "") -> str:
+def build_bank_description(bank: str, donor: str, tag: str = "", ref_code: str = "", use_va: bool = False) -> str:
     """
-    Builds realistic mutation narrative incorporating optional ref_code and program tag.
+    Builds realistic mutation narrative incorporating optional ref_code, VA format, and program tag.
     """
     bank = bank.upper()
-    ref_suffix = f" {ref_code}" if ref_code else ""
     tag_suffix = f" {tag}" if tag else ""
+
+    if use_va and ref_code:
+        prefix = BANK_VA_PREFIXES.get(bank, "39012")
+        role_digit = "2" if ref_code.startswith("G") else "1"
+        num_part = ref_code[1:].zfill(6)
+        va_num = f"{prefix}{role_digit}{num_part}"
+        return f"PEMBAYARAN VA {va_num} AN {donor.upper()}{tag_suffix}"
+
+    ref_suffix = f" {ref_code}" if ref_code else ""
 
     if bank == "BSI":
         return f"TRF CR DARI 7129384756 {donor.upper()}{ref_suffix}{tag_suffix}"
@@ -49,6 +65,7 @@ def generate_mutation(
     amount: float = None,
     tag: str = None,
     ref_code: str = None,
+    use_va: bool = False,
     mutation_id: str = None,
     is_credit: bool = True
 ) -> dict:
@@ -62,7 +79,7 @@ def generate_mutation(
     selected_id = mutation_id or f"MUT_{selected_bank}_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:6]}"
     tx_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    desc = build_bank_description(selected_bank, selected_donor, selected_tag, ref_code or "")
+    desc = build_bank_description(selected_bank, selected_donor, selected_tag, ref_code or "", use_va=use_va)
 
     return {
         "mutation_id": selected_id,
@@ -74,4 +91,3 @@ def generate_mutation(
         "type": "CR" if is_credit else "DB",
         "description": desc
     }
-

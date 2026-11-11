@@ -1,9 +1,12 @@
 /**
  * app.js
- * User Dashboard business logic: personal summary, intent creation, and alumni verification form.
+ * User Dashboard business logic: personal summary, intent creation,
+ * 2-Tab Virtual Account & QRIS instructions, 5-second real-time polling, and simulation triggers.
  */
 
 let currentUser = null;
+let activePollingTimer = null;
+let activeIntentData = null;
 
 async function initDashboard() {
   currentUser = getCurrentUser();
@@ -34,7 +37,7 @@ function renderVerificationStatusBanner() {
             <div style="font-size: 11px; font-weight: 700; color: var(--status-verified); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Status Terverifikasi</div>
             <h4 style="font-family: var(--font-display); color: #065F46; font-size: 16px; margin-bottom: 4px;">Alumni UPI Resmi</h4>
             <p style="font-size: 13px; color: #047857; margin: 0;">
-              ID Donatur Alumni Anda: <strong class="id-badge">${escapeApp(currentUser.ref_code)}</strong>. Setiap transfer dana yang menyertakan kode ini otomatis dicatat atas nama Anda.
+              ID Donatur Alumni Anda: <strong class="id-badge">${escapeApp(currentUser.ref_code)}</strong>. Setiap transfer dana atau pembayaran Virtual Account otomatis dicatat atas nama Anda.
             </p>
           </div>
           <span class="badge badge-verified">Terverifikasi</span>
@@ -51,14 +54,13 @@ function renderVerificationStatusBanner() {
         </p>
       `;
     } else {
-      // NONE or REJECTED: Show upload verification form
       banner.style.display = 'block';
       banner.className = 'card';
       banner.style.borderTop = '3px solid var(--crimson-700)';
       banner.innerHTML = `
         <h3 class="card-title" style="color: var(--crimson-900);">Verifikasi Status Kelulusan Alumni UPI</h3>
         <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px;">
-          Untuk memperoleh ID resmi alumni (A000xxx) dan pelaporan donasi khusus alumni, mohon lengkapi verifikasi berikut. Berkas bukti (Ijazah / SKL / Kartu Alumni) akan otomatis dihapus oleh sistem setelah diverifikasi (kepatuhan UU No. 27/2022).
+          Untuk memperoleh ID resmi alumni (A000xxx) dan penerbitan nomor Virtual Account khusus alumni, mohon lengkapi verifikasi berikut. Berkas bukti akan otomatis dihapus oleh sistem setelah diverifikasi (UU No. 27/2022).
         </p>
         <form onsubmit="handleVerificationSubmit(event)" id="verifForm">
           <div class="grid-cols-3" style="margin-bottom: 14px;">
@@ -95,7 +97,6 @@ function renderVerificationStatusBanner() {
       `;
     }
   } else {
-    // Guest role
     banner.style.display = 'block';
     banner.className = 'card notice-box';
     banner.style.background = '#FFFFFF';
@@ -178,7 +179,7 @@ async function handleCreateIntent(e) {
 
   const btn = document.getElementById('btnSubmitIntent');
   btn.disabled = true;
-  btn.innerText = 'Membuat Instruksi Transfer...';
+  btn.innerText = 'Membuat Virtual Account & QRIS...';
 
   try {
     const res = await API.post('create_intent', {
@@ -190,8 +191,9 @@ async function handleCreateIntent(e) {
     });
 
     if (res.status === 'ok') {
+      activeIntentData = res;
       showTransferInstructionModal(res);
-      await loadMyDonationsData();
+      startRealtimePolling(res.intent_id);
     } else {
       alert('Gagal membuat instruksi donasi: ' + (res.message || 'Error'));
     }
@@ -207,48 +209,235 @@ function showTransferInstructionModal(res) {
   const box = document.getElementById('activeIntentBox');
   if (!box) return;
 
+  const va = res.virtual_account || {
+    va_number: '895081000471',
+    va_formatted: '89508 1 000471',
+    bank: res.bank,
+    bank_prefix: '89508'
+  };
+
   box.style.display = 'block';
   box.innerHTML = `
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+    <!-- Header Modal -->
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
       <div>
-        <span class="badge badge-pending" style="margin-bottom: 4px;">Instruksi Transfer</span>
-        <h3 style="font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--crimson-900);">Rincian Rekening Tujuan & Kode Berita</h3>
+        <span class="badge badge-pending" style="margin-bottom: 4px;">Instruksi Pembayaran Otomatis</span>
+        <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--crimson-900);">
+          Pembayaran Donasi: ${escapeApp(res.formatted_amount)}
+        </h3>
       </div>
-      <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="document.getElementById('activeIntentBox').style.display='none'">Tutup</button>
+      <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="closeInstructionBox()">Tutup</button>
     </div>
-    <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 16px;">
-      Silakan transfer donasi sesuai rincian berikut melalui m-banking atau ATM bank Anda:
-    </p>
 
-    <div style="background: white; border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 18px; margin-bottom: 14px;">
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 14px;">
-        <div>
-          <div class="metric-label">Bank Tujuan</div>
-          <div style="font-size: 16px; font-weight: 700; color: var(--text-main);">${escapeApp(res.bank)} (Rek. Beasiswa IKA UPI)</div>
-        </div>
-        <div>
-          <div class="metric-label">Nominal Transfer</div>
-          <div style="font-size: 18px; font-weight: 800; color: var(--crimson-700);">${escapeApp(res.formatted_amount)}</div>
+    <!-- 2-Tab Navigation Buttons -->
+    <div style="display: flex; gap: 6px; margin-bottom: 16px; border-bottom: 1px solid var(--border-dim); padding-bottom: 8px;">
+      <button id="tabBtnVA" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px;" onclick="switchInstructionTab('va')">
+        Virtual Account (${escapeApp(res.bank)})
+      </button>
+      <button id="tabBtnQRIS" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px;" onclick="switchInstructionTab('qris')">
+        Scan QRIS (Semua Bank / E-Wallet)
+      </button>
+    </div>
+
+    <!-- Content Tab 1: Virtual Account -->
+    <div id="contentTabVA" style="display: block; background: #FFFFFF; border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 18px; margin-bottom: 16px;">
+      <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; font-weight: 600; margin-bottom: 2px;">Bank Penagihan</div>
+      <div style="font-size: 15px; font-weight: 700; color: var(--text-main); margin-bottom: 12px;">Bank ${escapeApp(res.bank)} Virtual Account</div>
+
+      <div style="background: #FAFAFA; border: 1px dashed var(--crimson-700); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Nomor Virtual Account (12 Digit)</div>
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <span style="font-family: var(--font-mono); font-size: 22px; font-weight: 800; color: var(--crimson-900); letter-spacing: 2px;">
+            ${escapeApp(va.va_formatted)}
+          </span>
+          <button class="btn btn-primary" style="font-size: 11px; padding: 6px 12px;" onclick="navigator.clipboard.writeText('${va.va_number}'); alert('Nomor Virtual Account ${va.va_number} berhasil disalin!');">
+            Salin Nomor VA
+          </button>
         </div>
       </div>
 
-      <div style="border-top: 1px solid var(--border-dim); padding-top: 14px;">
-        <div class="metric-label">Kode Referensi Donatur Anda</div>
-        <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
-          <span class="id-badge" style="font-size: 16px;">${escapeApp(res.ref_code)}</span>
-          <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="navigator.clipboard.writeText('${res.ref_code}'); alert('Kode referensi berhasil disalin.');">Salin Kode</button>
-        </div>
-      </div>
-
-      <div style="background: var(--gold-50); border-left: 3px solid var(--gold-500); padding: 10px 14px; font-size: 12px; color: var(--gold-600); margin-top: 14px;">
-        <strong>Perhatian:</strong> Cantumkan kode <strong>${escapeApp(res.ref_code)}</strong> pada kolom <em>Berita/Keterangan</em> transfer agar mutasi teridentifikasi instan.
+      <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+        &bull; <strong>Kode Prefix Perusahaan:</strong> <code>${escapeApp(va.bank_prefix)}</code> (Lembaga Beasiswa IKA UPI)<br>
+        &bull; <strong>Nama Penerima:</strong> BEASISWA IKA UPI - ${escapeApp(currentUser.full_name || 'ALUMNI')}<br>
+        &bull; <strong>Nominal Transfer:</strong> ${escapeApp(res.formatted_amount)} (Harus persis sama)<br>
+        &bull; Bebas biaya admin melalui transfer sesama Bank ${escapeApp(res.bank)} atau BI-FAST.
       </div>
     </div>
-    <div style="font-size: 12px; color: var(--text-dim);">
-      Sistem memantau mutasi secara real-time. Tanda terima sah akan langsung dikirimkan ke email Anda begitu dana terverifikasi.
+
+    <!-- Content Tab 2: QRIS (Scan QR) -->
+    <div id="contentTabQRIS" style="display: none; background: #FFFFFF; border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 18px; margin-bottom: 16px; text-align: center;">
+      <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">Merchant Resmi QRIS</div>
+      <div style="font-size: 16px; font-weight: 800; color: var(--crimson-900); margin-bottom: 12px;">BEASISWA IKATAN ALUMNI UPI</div>
+      
+      <!-- Real Canvas QR Render Container -->
+      <div style="display: flex; justify-content: center; margin-bottom: 12px;">
+        <div id="qrisContainer" style="background: #FFFFFF; padding: 12px; border: 1px solid var(--border-mid); border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); display: inline-block;"></div>
+      </div>
+
+      <div style="font-family: var(--font-mono); font-size: 17px; font-weight: 800; color: var(--crimson-700); margin-bottom: 6px;">
+        ${escapeApp(res.formatted_amount)}
+      </div>
+      <p style="font-size: 12px; color: var(--text-dim); max-width: 400px; margin: 0 auto;">
+        Buka BCA Mobile, Livin Mandiri, BRImo, BNI Mobile, BSI Mobile, atau e-wallet apa pun, lalu scan kode QR di atas untuk membayar.
+      </p>
+    </div>
+
+    <!-- Real-time Polling Status & Simulation Trigger -->
+    <div style="background: #FFFDF9; border: 1px solid var(--gold-500); border-radius: var(--radius-sm); padding: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="display: inline-block; width: 10px; height: 10px; background: var(--gold-500); border-radius: 50%; animation: pulse 1.5s infinite;"></span>
+        <div>
+          <div style="font-size: 12px; font-weight: 700; color: var(--gold-600);" id="pollingStatusLabel">
+            Memantau Mutasi Bank Masuk (Cek otomatis per 5 detik)...
+          </div>
+          <div style="font-size: 11px; color: var(--text-dim);" id="pollingCountdownLabel">
+            Pengecekan berikutnya dalam 5 detik
+          </div>
+        </div>
+      </div>
+      
+      <!-- Simulation Button for Presentations -->
+      <button class="btn btn-gold" style="font-size: 11px; padding: 6px 12px;" onclick="triggerSimulatedPayment('${res.intent_id}')">
+        Simulasikan Pembayaran Masuk (Demo)
+      </button>
     </div>
   `;
+
+  // Render QR Code immediately in background
+  setTimeout(() => {
+    const qrisElem = document.getElementById('qrisContainer');
+    if (qrisElem && window.QRCode) {
+      qrisElem.innerHTML = '';
+      new QRCode(qrisElem, {
+        text: (res.qris && res.qris.qris_payload) || `QRIS-DONASI-${res.intent_id}-${va.va_number}-${res.amount}`,
+        width: 180,
+        height: 180,
+        colorDark: "#6B0E17",
+        colorLight: "#FFFFFF",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+  }, 50);
+
   window.scrollTo({ top: box.offsetTop - 80, behavior: 'smooth' });
+}
+
+function switchInstructionTab(tab) {
+  const tabVA = document.getElementById('contentTabVA');
+  const tabQR = document.getElementById('contentTabQRIS');
+  const btnVA = document.getElementById('tabBtnVA');
+  const btnQR = document.getElementById('tabBtnQRIS');
+
+  if (tab === 'va') {
+    tabVA.style.display = 'block';
+    tabQR.style.display = 'none';
+    btnVA.className = 'btn btn-primary';
+    btnQR.className = 'btn btn-secondary';
+  } else {
+    tabVA.style.display = 'none';
+    tabQR.style.display = 'block';
+    btnVA.className = 'btn btn-secondary';
+    btnQR.className = 'btn btn-primary';
+  }
+}
+
+function closeInstructionBox() {
+  if (activePollingTimer) {
+    clearInterval(activePollingTimer);
+    activePollingTimer = null;
+  }
+  document.getElementById('activeIntentBox').style.display = 'none';
+}
+
+/**
+ * 5-Second Real-Time Polling Engine
+ */
+function startRealtimePolling(intentId) {
+  if (activePollingTimer) {
+    clearInterval(activePollingTimer);
+  }
+
+  let secondsLeft = 5;
+  activePollingTimer = setInterval(async () => {
+    secondsLeft--;
+    const countdownElem = document.getElementById('pollingCountdownLabel');
+    if (countdownElem) {
+      countdownElem.innerText = `Pengecekan berikutnya dalam ${secondsLeft} detik`;
+    }
+
+    if (secondsLeft <= 0) {
+      secondsLeft = 5;
+      try {
+        const check = await API.get('check_intent', {
+          id_token: getAuthToken(),
+          intent_id: intentId
+        });
+
+        if (check.status === 'ok' && check.intent_status === 'MATCHED') {
+          // STOP polling and display success banner
+          clearInterval(activePollingTimer);
+          activePollingTimer = null;
+          handlePaymentSuccess(intentId);
+        }
+      } catch (err) {
+        console.warn('[POLLING-ERR]', err);
+      }
+    }
+  }, 1000);
+}
+
+/**
+ * Triggered when payment is confirmed by real-time poller
+ */
+async function handlePaymentSuccess(intentId) {
+  const box = document.getElementById('activeIntentBox');
+  if (!box) return;
+
+  box.style.borderTop = '4px solid var(--status-verified)';
+  box.style.background = '#ECFDF5';
+  box.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 10px 0;">
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: var(--status-verified); text-transform: uppercase; letter-spacing: 0.5px;">Pembayaran Terverifikasi Real-Time</div>
+        <h3 style="font-family: var(--font-display); font-size: 19px; color: #065F46; margin: 4px 0;">
+          Alhamdulillah! Donasi Anda Telah Masuk ke Kas Beasiswa
+        </h3>
+        <p style="font-size: 13px; color: #047857; margin: 0;">
+          Dana telah dicatat ke buku kas Google Sheets pengelola. Email bukti tanda terima sah telah dikirimkan ke email Anda.
+        </p>
+      </div>
+      <button class="btn btn-success" onclick="closeInstructionBox()">Selesai</button>
+    </div>
+  `;
+
+  // Instantly refresh personal donations history table and public stats
+  await loadMyDonationsData();
+}
+
+/**
+ * Trigger simulated payment from UI button (Demo Mode / Presentation helper)
+ */
+async function triggerSimulatedPayment(intentId) {
+  const label = document.getElementById('pollingStatusLabel');
+  if (label) {
+    label.innerText = 'Mengirimkan sinyal mutasi pembayaran bank...';
+  }
+
+  try {
+    const res = await API.post('simulate_payment', {
+      id_token: getAuthToken(),
+      intent_id: intentId
+    });
+
+    if (res.status === 'ok') {
+      // The next polling cycle will catch MATCHED, or trigger immediately
+      handlePaymentSuccess(intentId);
+    } else {
+      alert('Gagal simulasi: ' + (res.message || 'Error'));
+    }
+  } catch (e) {
+    alert('Simulasi pembayaran gagal: ' + e.message);
+  }
 }
 
 async function loadMyDonationsData() {

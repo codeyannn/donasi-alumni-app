@@ -1,6 +1,6 @@
 """
 send_webhook.py
-CLI tool to dispatch multi-bank donation webhooks with optional ref_code for DonasiAlumniApp.
+CLI tool to dispatch multi-bank donation webhooks with support for Virtual Account, ref_code, and auto-matching.
 """
 
 import argparse
@@ -20,13 +20,14 @@ from payloads import generate_mutation, SUPPORTED_BANKS
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Multi-bank donation webhook dispatcher with ref_code support.")
+    parser = argparse.ArgumentParser(description="Multi-bank donation webhook dispatcher with VA and ref_code support.")
     parser.add_argument("--url", type=str, default=None, help="Apps Script Web App Executable URL")
     parser.add_argument("--token", type=str, default=None, help="Webhook secret token")
     parser.add_argument("--bank", type=str, choices=SUPPORTED_BANKS + [b.lower() for b in SUPPORTED_BANKS], help="Target bank (BSI, Mandiri, BCA, BNI, BRI)")
     parser.add_argument("--amount", type=float, default=None, help="Donation amount in IDR")
     parser.add_argument("--donor", type=str, default=None, help="Donor raw name")
     parser.add_argument("--ref", type=str, default=None, help="Alumni/Guest Reference code (e.g., A000471 or G000012)")
+    parser.add_argument("--va", action="store_true", help="Generate mutation in Virtual Account payment format")
     parser.add_argument("--tag", type=str, default="BEASISWA", help="Program keyword (BEASISWA, WAKAF, etc.)")
     parser.add_argument("--duplicate", action="store_true", help="Send duplicate mutation twice to test dedupe")
     parser.add_argument("--bad-token", action="store_true", help="Send wrong token to verify 401 response")
@@ -46,27 +47,29 @@ def main():
         amount=args.amount,
         tag=args.tag,
         ref_code=args.ref,
+        use_va=args.va,
         mutation_id=mut_id
     )
     payload = [mut]
 
     print("=" * 60)
-    print("🎓 DONASI ALUMNI APP — WEBHOOK SIMULATOR")
+    print("DONASI ALUMNI APP - WEBHOOK SIMULATOR")
     print("=" * 60)
     print(f"Target URL: {target_url or '[Dry-Run Mode]'}")
     print(f"Token:      {token}")
-    print(f"Ref Code:   {args.ref or '[None / Testing Tier 2-3]'}")
+    print(f"Ref Code:   {args.ref or '[None]'}")
+    print(f"Format VA:  {'YES (Virtual Account)' if args.va else 'NO (Direct Transfer)'}")
     print("-" * 60)
     print("Payload:")
     print(json.dumps(payload, indent=2))
     print("-" * 60)
 
     if args.dry_run or not target_url or "REPLACE_WITH" in target_url:
-        print("ℹ️ Dry-run completed. No HTTP call dispatched.")
+        print("Dry-run completed. No HTTP call dispatched.")
         return
 
     req_url = f"{target_url}?token={token}"
-    print("📡 Sending POST request...")
+    print("Sending POST request...")
     try:
         r = requests.post(req_url, headers={"Content-Type": "application/json"}, data=json.dumps(payload), timeout=30)
         print(f"Status Code: {r.status_code}")
@@ -76,7 +79,7 @@ def main():
             print("Response:", r.text)
 
         if args.duplicate:
-            print("\n🔁 Re-sending identical mutation to verify deduplication...")
+            print("\nRe-sending identical mutation to verify deduplication...")
             r2 = requests.post(req_url, headers={"Content-Type": "application/json"}, data=json.dumps(payload), timeout=30)
             print(f"Status Code: {r2.status_code}")
             try:
@@ -85,9 +88,8 @@ def main():
                 print(r2.text)
 
     except requests.exceptions.RequestException as e:
-        print(f"❌ Network error: {e}")
+        print(f"Network error: {e}")
 
 
 if __name__ == "__main__":
     main()
-

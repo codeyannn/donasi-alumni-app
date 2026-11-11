@@ -1,14 +1,14 @@
 /**
  * Donations.gs
- * Intent creation, intent expiry, user personal donation history, and manual matching by admin.
+ * Intent creation, intent expiry, user personal donation history, status polling, and payment simulation.
  */
 
 /**
- * Creates a donation intent for a user.
+ * Creates a donation intent for a user, generating dedicated Virtual Account & QRIS string.
  * 
  * @param {string} idToken - User auth token.
  * @param {Object} data - {amount, bank, program, is_anonymous}
- * @returns {Object} Intent details with transfer reference instructions.
+ * @returns {Object} Intent details with transfer reference, Virtual Account, & QRIS.
  */
 function createDonationIntent(idToken, data) {
   const profile = verifyIdToken(idToken);
@@ -28,18 +28,19 @@ function createDonationIntent(idToken, data) {
   const program = String(data.program || 'Beasiswa Alumni UPI').trim();
   const isAnon = data.is_anonymous ? 'YES' : 'NO';
 
-  // If alumni, user must be verified to have an A000xxx ref_code
   let refCode = user.ref_code;
   if (!refCode) {
     if (user.role === 'ALUMNI') {
       throw new Error('Akun Alumni Anda belum terverifikasi oleh admin. Mohon selesaikan pengajuan verifikasi.');
     } else {
-      // Fallback for guest if somehow missing
       const seq = getNextCounterValue_('GUEST');
       refCode = formatRefCode('G', seq);
       updateUserVerificationStatus_(user.user_id, 'NONE', refCode);
     }
   }
+
+  // Generate Bank-specific Virtual Account
+  const vaInfo = generateVirtualAccount(bank, refCode);
 
   const now = new Date();
   const windowHours = parseInt(getConfig_('MATCH_WINDOW_HOURS') || '24', 10);
@@ -62,7 +63,10 @@ function createDonationIntent(idToken, data) {
     '' // matched_tx_id
   ]);
 
-  logAudit_(user.email, 'CREATE_INTENT', intentId, bank + ' ' + amount + ' Ref: ' + refCode);
+  logAudit_(user.email, 'CREATE_INTENT', intentId, bank + ' ' + amount + ' VA: ' + vaInfo.va_number);
+
+  // Dynamic QRIS string payload (QRIS Static/Dynamic Merchant Specification)
+  const qrisString = `00020101021226670016ID.GO.BI.QRIS011893600999000000010215${vaInfo.va_number}52048398530336054${String(amount).padStart(2,'0')}5802ID5923BEASISWA IKATAN ALUMNI6007BANDUNG62170113${intentId}6304ABCD`;
 
   return {
     status: 'ok',
@@ -73,20 +77,119 @@ function createDonationIntent(idToken, data) {
     program: program,
     formatted_amount: formatRupiah(amount),
     expires_at: expiresAt.toISOString(),
+    virtual_account: {
+      bank: bank,
+      bank_prefix: vaInfo.bank_prefix,
+      va_number: vaInfo.va_number,
+      va_formatted: vaInfo.va_formatted,
+      account_name: 'BEASISWA IKA UPI - ' + (user.full_name || 'ALUMNI')
+    },
+    qris: {
+      merchant_name: 'BEASISWA IKA UPI',
+      qris_payload: qrisString,
+      amount: amount
+    },
     transfer_instruction: {
       target_bank: bank,
       amount: amount,
       transfer_note: refCode,
-      note_instruction: 'PENTING: Tuliskan kode referensi "' + refCode + '" pada kolom berita/keterangan transfer m-banking Anda agar donasi terverifikasi instan.'
+      note_instruction: 'PENTING: Salin nomor Virtual Account di atas atau scan QRIS melalui m-banking/e-wallet Anda.'
     }
   };
 }
 
 /**
- * Retrieves the logged-in user's personal donation history and stats.
+ * Checks the status of a specific intent (called every 5 seconds by frontend real-time poller).
  * 
  * @param {string} idToken - User auth token.
- * @returns {Object} Personal donation stats and transaction history.
+ * @param {string} intentId - Target intent ID.
+ * @returns {Object} Current status ('PENDING' or 'MATCHED') + transaction details if matched.
+ */
+function checkIntentStatus(idToken, intentId) {
+  if (!intentId) throw new Error('Missing intent_id parameter.');
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const intentSheet = ss.getSheetByName(SHEET_NAMES.INTENTS);
+  if (!intentSheet || intentSheet.getLastRow() <= 1) {
+    return { status: 'ok', intent_status: 'NOT_FOUND' };
+  }
+
+  const data = intentSheet.getRange(2, 1, intentSheet.getLastRow() - 1, 10).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] === intentId) {
+      const intentStatus = data[i][6];
+      const matchedTxId = data[i][9];
+      return {
+        status: 'ok',
+        intent_id: intentId,
+        intent_status: intentStatus, // PENDING, MATCHED, EXPIRED
+        matched_tx_id: matchedTxId || null
+      };
+    }
+  }
+
+  return { status: 'ok', intent_status: 'NOT_FOUND' };
+}
+
+/**
+ * Triggers instant payment simulation for live demo presentations.
+ * Mimics bank webhook execution for the given intent.
+ * 
+ * @param {string} idToken - User auth token.
+ * @param {string} intentId - Target intent ID.
+ * @returns {Object} Webhook processing result.
+ */
+function simulateIntentPayment(idToken, intentId) {
+  const profile = verifyIdToken(idToken);
+  const user = findUserByEmail_(profile.email);
+  if (!user) throw new Error('User not found.');
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const intentSheet = ss.getSheetByName(SHEET_NAMES.INTENTS);
+  const data = intentSheet.getRange(2, 1, intentSheet.getLastRow() - 1, 10).getValues();
+
+  let targetIntent = null;
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] === intentId) {
+      targetIntent = {
+        intent_id: data[i][0],
+        user_id: data[i][1],
+        ref_code: data[i][2],
+        amount: data[i][3],
+        bank: data[i][4],
+        program: data[i][5],
+        status: data[i][6]
+      };
+      break;
+    }
+  }
+
+  if (!targetIntent) throw new Error('Intent not found.');
+  if (targetIntent.status === 'MATCHED') return { status: 'ok', message: 'Already paid' };
+
+  // Generate realistic VA narration
+  const vaInfo = generateVirtualAccount(targetIntent.bank, targetIntent.ref_code);
+  const fakeMutation = {
+    mutation_id: 'SIM_' + targetIntent.bank + '_' + Date.now().toString().slice(-6),
+    bank: targetIntent.bank,
+    amount: targetIntent.amount,
+    type: 'CR',
+    description: `PEMBAYARAN VA ${vaInfo.va_number} AN ${user.full_name.toUpperCase()} BEASISWA`,
+    transaction_date: Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd HH:mm:ss')
+  };
+
+  // Dispatch into webhook processor
+  const result = handleWebhookMutations_([fakeMutation]);
+  return {
+    status: 'ok',
+    message: 'Simulated payment processed successfully',
+    mutation: fakeMutation,
+    result: result
+  };
+}
+
+/**
+ * Retrieves the logged-in user's personal donation history and stats.
  */
 function getMyDonations(idToken) {
   const profile = verifyIdToken(idToken);
@@ -102,12 +205,10 @@ function getMyDonations(idToken) {
   let myTxCount = 0;
   const bankBreakdown = {};
 
-  // 1. Gather confirmed transactions
   if (txSheet && txSheet.getLastRow() > 1) {
     const txData = txSheet.getRange(2, 1, txSheet.getLastRow() - 1, 17).getValues();
     for (let i = 0; i < txData.length; i++) {
       const row = txData[i];
-      // Match by user_id or ref_code
       if ((user.user_id && row[12] === user.user_id) || (user.ref_code && row[13] === user.ref_code)) {
         const amt = parseFloat(row[6]) || 0;
         const b = String(row[3] || 'UNKNOWN').trim();
@@ -130,19 +231,21 @@ function getMyDonations(idToken) {
     }
   }
 
-  // 2. Gather active pending intents
   const pendingIntents = [];
   if (intentSheet && intentSheet.getLastRow() > 1) {
     const itData = intentSheet.getRange(2, 1, intentSheet.getLastRow() - 1, 10).getValues();
     for (let j = 0; j < itData.length; j++) {
       const it = itData[j];
       if (it[1] === user.user_id && it[6] === 'PENDING') {
+        const vaInfo = generateVirtualAccount(it[4], it[2]);
         pendingIntents.push({
           intent_id: it[0],
           ref_code: it[2],
           amount: it[3],
           formatted_amount: formatRupiah(it[3]),
           bank: it[4],
+          va_number: vaInfo.va_number,
+          va_formatted: vaInfo.va_formatted,
           program: it[5],
           created_at: it[7],
           expires_at: it[8]
@@ -191,4 +294,3 @@ function expireStaleIntents() {
     }
   }
 }
-
