@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal Pengelola — Beasiswa IKA UPI</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <header>
+    <a href="index.html" class="brand">
+      <div class="brand-insignia" style="background: var(--crimson-900);">ADM</div>
+      <div class="brand-meta">
+        <h1>Portal Pengelola Beasiswa</h1>
+        <p>Kontrol Verifikasi & Rekonsiliasi Webhook</p>
+      </div>
+    </a>
+    <div id="navRight"></div>
+  </header>
+
+  <main class="container">
+
+    <!-- Admin Operational Nav Tabs -->
+    <div style="display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 2px solid var(--border-dim); padding-bottom: 12px; flex-wrap: wrap;">
+      <button class="btn btn-primary" id="tabBtnVerif" onclick="switchTab('verif')">Verifikasi Alumni (<span id="verifBadgeCount">0</span>)</button>
+      <button class="btn btn-secondary" id="tabBtnQueue" onclick="switchTab('queue')">Review Mutasi Unmatched (<span id="queueBadgeCount">0</span>)</button>
+      <button class="btn btn-secondary" id="tabBtnInsights" onclick="switchTab('insights')">Insight & Statistik Dana</button>
+    </div>
+
+    <!-- Section 1: Verifications Tab -->
+    <div id="sectionVerif" class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+        <h3 class="card-title" style="margin-bottom: 0;">Pengajuan Verifikasi Ijazah Alumni UPI</h3>
+        <button class="btn btn-secondary" style="font-size: 11px;" onclick="loadAdminVerifications()">Segarkan Data</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px;">
+        Tinjau berkas kelulusan. Begitu disetujui, sistem menerbitkan kode urut ID Alumni (A000xxx) dan dokumen bukti otomatis dihapus dari Drive (prinsip minimisasi data UU No. 27/2022).
+      </p>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Waktu</th>
+              <th>Nama Lengkap</th>
+              <th>Email</th>
+              <th>NIM</th>
+              <th>Tahun</th>
+              <th>Fakultas</th>
+              <th>Status</th>
+              <th>Tindakan</th>
+            </tr>
+          </thead>
+          <tbody id="verifTableBody">
+            <tr><td colspan="8" style="text-align: center; color: var(--text-dim); padding: 20px;">Memuat antrean verifikasi...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 2: Review Queue Tab -->
+    <div id="sectionQueue" class="card" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+        <h3 class="card-title" style="margin-bottom: 0;">Antrean Mutasi Tier 3 (Review Manual)</h3>
+        <button class="btn btn-secondary" style="font-size: 11px;" onclick="loadAdminQueue()">Segarkan Data</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px;">
+        Daftar mutasi yang tidak memuat kode referensi dan tidak dapat dicocokkan otomatis (misal: benturan 2 intent dengan nominal sama). Tautkan manual ke ID donatur.
+      </p>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Waktu</th>
+              <th>Bank</th>
+              <th>Nominal</th>
+              <th>Narasi Bank Mentah</th>
+              <th>Keterangan Sistem</th>
+              <th>Status</th>
+              <th>Tautkan ke Donatur</th>
+            </tr>
+          </thead>
+          <tbody id="queueTableBody">
+            <tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 20px;">Memuat antrean review...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 3: Insights Tab -->
+    <div id="sectionInsights" class="card" style="display: none;">
+      <h3 class="card-title">Metrik Kinerja & Distribusi Dana</h3>
+      
+      <div class="grid-cols-3" style="margin-bottom: 24px;">
+        <div class="metric-box accent-red">
+          <div class="metric-label">Total Penghimpunan</div>
+          <div class="metric-value" id="insightTotalAmount" style="color: var(--crimson-700);">Rp 0</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Total Transaksi</div>
+          <div class="metric-value" id="insightTotalCount">0 Mutasi</div>
+        </div>
+        <div class="metric-box accent-gold">
+          <div class="metric-label">Alumni Terverifikasi</div>
+          <div class="metric-value" id="insightVerifiedAlumni" style="color: var(--gold-600);">0 Alumni</div>
+        </div>
+      </div>
+
+      <div class="grid-cols-2">
+        <div class="card" style="border: 1px solid var(--border-dim); margin-bottom: 0;">
+          <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-main); margin-bottom: 12px;">Distribusi Akurasi Matching Webhook</h4>
+          <div id="tierInsightBox" style="font-size: 13px; line-height: 2;">
+            Memuat distribusi matching...
+          </div>
+        </div>
+        <div class="card" style="border: 1px solid var(--border-dim); margin-bottom: 0;">
+          <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-main); margin-bottom: 12px;">Distribusi Dana per Bank Rekening</h4>
+          <div id="bankInsightBox" style="font-size: 13px; line-height: 2;">
+            Memuat breakdown bank...
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>
+    <strong>Ikatan Alumni Universitas Pendidikan Indonesia</strong> &bull; Portal Khusus Pengelola Beasiswa
+  </footer>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

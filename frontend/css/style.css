@@ -1,0 +1,450 @@
+/* 
+ * DonasiAlumniApp — Editorial Academic Identity System
+ * Palette: UPI Red (Crimson Primary), Crisp Off-White, Warm Academic Gold/Amber accent, Charcoal Slate.
+ * Typography: Plus Jakarta Sans (Headings) & Inter (UI/Body) & JetBrains Mono (Codes).
+ * Zero AI Slop: No generic emoji clutter, subtle geometric architecture watermarks.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
+
+:root {
+  /* UPI Crimson Red palette */
+  --crimson-900: #6B0E17;
+  --crimson-800: #88131E;
+  --crimson-700: #B91C1C;
+  --crimson-600: #DC2626;
+  --crimson-50:  #FEF2F2;
+
+  /* Academic Warm Gold Accent (Scholarship / Beasiswa vibe) */
+  --gold-600:    #B45309;
+  --gold-500:    #D97706;
+  --gold-100:    #FEF3C7;
+  --gold-50:     #FFFBEB;
+
+  /* Neutrals: Clean White, Architectural Off-White, Slate */
+  --bg-canvas:   #FBFBFB;
+  --surface-card:#FFFFFF;
+  --surface-sub: #F4F5F7;
+  --border-dim:  #E5E7EB;
+  --border-mid:  #D1D5DB;
+  
+  --text-main:   #111827;
+  --text-sub:    #4B5563;
+  --text-dim:    #6B7280;
+
+  /* Status Tokens */
+  --status-verified: #047857;
+  --status-verified-bg: #ECFDF5;
+  --status-pending:  #B45309;
+  --status-pending-bg:  #FFFBEB;
+  --status-alert:    #B91C1C;
+  --status-alert-bg:    #FEF2F2;
+
+  /* Typography */
+  --font-display: 'Plus Jakarta Sans', -apple-system, sans-serif;
+  --font-body:    'Inter', -apple-system, sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-canvas);
+  color: var(--text-main);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Background Architectural Graphic Shapes (UPI Campus Pillars / Geometry) */
+body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -80px;
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle, rgba(185, 28, 28, 0.04) 0%, rgba(217, 119, 6, 0.02) 60%, transparent 75%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: "";
+  position: absolute;
+  top: 380px;
+  left: -120px;
+  width: 440px;
+  height: 440px;
+  background: radial-gradient(circle, rgba(217, 119, 6, 0.03) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Header Component */
+header {
+  background-color: #FFFFFF;
+  border-bottom: 2px solid var(--crimson-700);
+  padding: 14px 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-decoration: none;
+}
+
+.brand-insignia {
+  width: 36px;
+  height: 36px;
+  background: var(--crimson-700);
+  color: #FFFFFF;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: -0.5px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 2px 4px rgba(185, 28, 28, 0.2);
+}
+
+.brand-insignia::after {
+  content: "";
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  background: var(--gold-500);
+  border-radius: 1px;
+}
+
+.brand-meta h1 {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: var(--crimson-900);
+  text-transform: uppercase;
+}
+
+.brand-meta p {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+/* Layout */
+.container {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 28px 20px;
+  width: 100%;
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+
+/* Clean Sharp Cards with Top Geometric Accent */
+.card {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.card-hero {
+  border-top: 4px solid var(--crimson-700);
+  background: linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%);
+}
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.2px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 16px;
+  background-color: var(--crimson-700);
+  border-radius: 2px;
+}
+
+/* Grid Systems */
+.grid-cols-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.grid-cols-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+/* Precision Metric Box */
+.metric-box {
+  background: #FFFFFF;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-box::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border-mid);
+}
+
+.metric-box.accent-red::before {
+  background: var(--crimson-700);
+}
+
+.metric-box.accent-gold::before {
+  background: var(--gold-500);
+}
+
+.metric-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.metric-value {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.5px;
+}
+
+/* Button System */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease-in-out;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background-color: var(--crimson-700);
+  color: #FFFFFF;
+}
+
+.btn-primary:hover {
+  background-color: var(--crimson-800);
+}
+
+.btn-secondary {
+  background-color: #FFFFFF;
+  color: var(--text-main);
+  border-color: var(--border-mid);
+}
+
+.btn-secondary:hover {
+  background-color: var(--surface-sub);
+}
+
+.btn-gold {
+  background-color: var(--gold-500);
+  color: #FFFFFF;
+}
+
+.btn-gold:hover {
+  background-color: var(--gold-600);
+}
+
+.btn-danger {
+  background-color: var(--crimson-700);
+  color: #FFFFFF;
+}
+
+.btn-success {
+  background-color: var(--status-verified);
+  color: #FFFFFF;
+}
+
+/* Form Inputs */
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.form-control {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-mid);
+  font-family: var(--font-body);
+  font-size: 13px;
+  background-color: #FFFFFF;
+  color: var(--text-main);
+  transition: border-color 0.15s ease;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: var(--crimson-700);
+  box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.12);
+}
+
+/* Badges & Monospace Code Tags */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.badge-verified { background: var(--status-verified-bg); color: var(--status-verified); border: 1px solid rgba(4, 120, 87, 0.2); }
+.badge-pending  { background: var(--status-pending-bg); color: var(--status-pending); border: 1px solid rgba(180, 83, 9, 0.2); }
+.badge-alert    { background: var(--status-alert-bg); color: var(--status-alert); border: 1px solid rgba(185, 28, 28, 0.2); }
+.badge-neutral  { background: #F3F4F6; color: #4B5563; border: 1px solid #E5E7EB; }
+
+.id-badge {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--crimson-900);
+  background: var(--crimson-50);
+  border: 1px solid rgba(185, 28, 28, 0.2);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+
+/* Clean Dense Data Table */
+.table-responsive {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  background-color: var(--surface-sub);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border-dim);
+  text-align: left;
+}
+
+td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-dim);
+  color: var(--text-main);
+}
+
+tr:hover td {
+  background-color: #FAFAFA;
+}
+
+/* Banner Notices */
+.notice-box {
+  border-radius: var(--radius-sm);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  border-left: 4px solid var(--border-mid);
+}
+
+.notice-box.verified {
+  background-color: var(--status-verified-bg);
+  border-color: var(--status-verified);
+}
+
+.notice-box.pending {
+  background-color: var(--gold-50);
+  border-color: var(--gold-500);
+}
+
+.notice-box.crimson {
+  background-color: var(--crimson-50);
+  border-color: var(--crimson-700);
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 24px 20px;
+  color: var(--text-dim);
+  font-size: 12px;
+  border-top: 1px solid var(--border-dim);
+  background-color: #FFFFFF;
+}
+
+footer strong {
+  color: var(--crimson-900);
+}

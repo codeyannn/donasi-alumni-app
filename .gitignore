@@ -1,0 +1,13 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Local Environment Variables
+.env
+
+# Node / System
+node_modules/
+.DS_Store
+Thumbs.db
+

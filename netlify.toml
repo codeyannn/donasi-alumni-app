@@ -1,0 +1,9 @@
+# Netlify Configuration for DonasiAlumniApp
+[build]
+  # Publish directory relative to repo root
+  publish = "frontend"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

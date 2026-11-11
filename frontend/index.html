@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Donasi Beasiswa Ikatan Alumni UPI</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+  <header>
+    <a href="index.html" class="brand">
+      <div class="brand-insignia">UPI</div>
+      <div class="brand-meta">
+        <h1>Beasiswa IKA UPI</h1>
+        <p>Sistem Donasi & Transparansi Alumni</p>
+      </div>
+    </a>
+    <div id="navRight"></div>
+  </header>
+
+  <main class="container">
+
+    <!-- Role Selection Card -->
+    <div class="card card-hero" style="padding: 36px 28px;">
+      <div style="max-width: 680px; margin-bottom: 28px;">
+        <span class="badge badge-alert" style="margin-bottom: 8px;">Portal Penghimpunan Dana</span>
+        <h2 style="font-family: var(--font-display); font-size: 24px; font-weight: 800; color: var(--crimson-900); letter-spacing: -0.4px; margin-bottom: 8px;">
+          Sinergi Alumni untuk Beasiswa Mahasiswa UPI
+        </h2>
+        <p style="color: var(--text-sub); font-size: 14px; line-height: 1.6;">
+          Mutasi donasi terverifikasi otomatis secara real-time via webhook bank tanpa memerlukan akses akun e-banking pengelola. Silakan tentukan jalur partisipasi Anda:
+        </p>
+      </div>
+
+      <div class="grid-cols-2" style="margin-bottom: 24px;">
+        
+        <!-- Alumni Option -->
+        <div style="border: 1px solid var(--crimson-700); border-radius: var(--radius-sm); padding: 22px; background: #FFFFFF; position: relative;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+            <span class="badge badge-alert">Jalur Khusus Alumni</span>
+            <span style="font-family: var(--font-mono); font-size: 11px; color: var(--crimson-700); font-weight: 700;">A000XXX</span>
+          </div>
+          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--crimson-900); margin-bottom: 8px;">
+            Saya Alumni UPI
+          </h3>
+          <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px; line-height: 1.5;">
+            Dapatkan ID unik resmi alumni setelah verifikasi ijazah/SKL. Seluruh donasi Anda akan tercatat permanen di basis data alumni.
+          </p>
+          <button class="btn btn-primary" style="width: 100%;" onclick="startLoginFlow('ALUMNI')">
+            Masuk sebagai Alumni
+          </button>
+        </div>
+
+        <!-- Guest Option -->
+        <div style="border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 22px; background: #FFFFFF;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+            <span class="badge badge-neutral">Jalur Tamu / Publik</span>
+            <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-weight: 700;">G000XXX</span>
+          </div>
+          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text-main); margin-bottom: 8px;">
+            Bukan Alumni / Simpatisan
+          </h3>
+          <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px; line-height: 1.5;">
+            Masyarakat umum atau donatur simpatisan dapat langsung menyalurkan donasi dengan ID Tamu tanpa kewajiban verifikasi ijazah.
+          </p>
+          <button class="btn btn-secondary" style="width: 100%;" onclick="startLoginFlow('GUEST')">
+            Masuk sebagai Tamu
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Privacy Consent Notice -->
+      <div style="font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--border-dim); padding-top: 16px;">
+        <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+          <input type="checkbox" id="privacyConsent" checked style="margin-top: 2px;">
+          <span>Saya menyetujui pemrosesan data untuk pencatatan donasi sesuai <strong>UU No. 27/2022 (Pelindungan Data Pribadi)</strong>. Identitas donatur disamarkan pada dasbor publik.</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Public Live Summary Section -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 10px;">
+        <h3 class="card-title" style="margin-bottom: 0;">Transparansi Perolehan Donasi Publik</h3>
+        <span class="badge badge-verified">Webhook Multi-Bank Terhubung</span>
+      </div>
+
+      <div class="grid-cols-3" style="margin-bottom: 24px;">
+        <div class="metric-box accent-red">
+          <div class="metric-label">Total Dana Terhimpun</div>
+          <div class="metric-value" id="pubTotalAmount" style="color: var(--crimson-700);">Rp 0</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Total Transaksi</div>
+          <div class="metric-value" id="pubTotalCount">0 Mutasi</div>
+        </div>
+        <div class="metric-box accent-gold">
+          <div class="metric-label">Perolehan Hari Ini</div>
+          <div class="metric-value" id="pubTodayAmount" style="color: var(--gold-600);">Rp 0</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Mutasi Donasi Terkini</span>
+        <span style="font-size: 11px; color: var(--text-dim); margin-left: 8px;">(Nama Disamarkan Sesuai UU PDP)</span>
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Tanggal</th>
+              <th>Bank</th>
+              <th>Nominal</th>
+              <th>Donatur</th>
+              <th>Status</th>
+              <th>Program</th>
+            </tr>
+          </thead>
+          <tbody id="pubRecentTable">
+            <tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 24px;">Memuat data mutasi terkini...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Login Modal -->
+  <div id="loginModal" style="display: none; position: fixed; inset: 0; background: rgba(17, 24, 39, 0.6); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(2px);">
+    <div class="card" style="max-width: 400px; width: 90%; border-top: 3px solid var(--crimson-700);">
+      <h3 id="modalTitle" style="font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--crimson-900); margin-bottom: 4px;">Autentikasi Akun Google</h3>
+      <p id="modalSub" style="font-size: 12px; color: var(--text-dim); margin-bottom: 18px;">Gunakan akun Google aktif Anda untuk melanjutkan.</p>
+      
+      <div id="googleBtnContainer" style="display: flex; justify-content: center; margin-bottom: 14px;"></div>
+
+      <div style="border-top: 1px dashed var(--border-mid); padding-top: 14px; margin-top: 14px;">
+        <button class="btn btn-secondary" style="font-size: 12px; width: 100%; border-style: dashed;" onclick="quickDemoLogin()">
+          Mode Demo Langsung
+        </button>
+      </div>
+
+      <button class="btn btn-secondary" style="margin-top: 10px; width: 100%; font-size: 12px;" onclick="closeLoginModal()">Batal</button>
+    </div>
+  </div>
+
+  <footer>
+    <strong>Ikatan Alumni Universitas Pendidikan Indonesia</strong> &bull; Sistem Donasi & Verifikasi Mutasi Multi-Bank
+  </footer>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    let selectedRole = 'ALUMNI';
+
+    function startLoginFlow(role) {
+      const consent = document.getElementById('privacyConsent').checked;
+      if (!consent) {
+        alert('Mohon centang persetujuan pemrosesan data pribadi terlebih dahulu.');
+        return;
+      }
+      selectedRole = role;
+      document.getElementById('modalTitle').innerText = (role === 'ALUMNI') ? 'Masuk sebagai Alumni UPI' : 'Masuk sebagai Tamu Umum';
+      document.getElementById('loginModal').style.display = 'flex';
+      initGoogleButton();
+    }
+
+    function closeLoginModal() {
+      document.getElementById('loginModal').style.display = 'none';
+    }
+
+    function quickDemoLogin() {
+      const consent = document.getElementById('privacyConsent').checked;
+      API.post('register_or_login', {
+        id_token: 'mock_token_' + selectedRole.toLowerCase(),
+        role: selectedRole,
+        consent: consent,
+        email: selectedRole === 'ADMIN' ? 'maulanaa1408@upi.edu' : 'demo@alumni.upi.edu',
+        name: selectedRole === 'ALUMNI' ? 'Ahmad Rizki' : 'Budi Santoso'
+      }).then(res => {
+        if (res.status === 'ok') {
+          window.localStorage.setItem('DONASI_USER', JSON.stringify(res.user));
+          window.localStorage.setItem('DONASI_TOKEN', 'mock_token_' + selectedRole.toLowerCase());
+          window.location.href = 'app.html';
+        }
+      });
+    }
+
+    async function loadPublicData() {
+      try {
+        const data = await API.get('public_summary');
+        if (data.status === 'ok') {
+          document.getElementById('pubTotalAmount').innerText = data.formatted_total || 'Rp 0';
+          document.getElementById('pubTotalCount').innerText = `${data.total_count || 0} Mutasi`;
+          document.getElementById('pubTodayAmount').innerText = data.formatted_today || 'Rp 0';
+
+          const tbody = document.getElementById('pubRecentTable');
+          tbody.innerHTML = '';
+          if (!data.recent_donations || data.recent_donations.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 24px;">Belum ada catatan mutasi donasi.</td></tr>';
+            return;
+          }
+
+          data.recent_donations.forEach(r => {
+            const tr = document.createElement('tr');
+            const catBadge = r.is_alumni 
+              ? '<span class="badge badge-alert">Alumni</span>' 
+              : '<span class="badge badge-neutral">Tamu</span>';
+            tr.innerHTML = `
+              <td>${escapeHtml(r.date)}</td>
+              <td><strong>${escapeHtml(r.bank)}</strong></td>
+              <td style="color: var(--crimson-700); font-weight: 700;">${escapeHtml(r.formatted_amount)}</td>
+              <td>${escapeHtml(r.donor)}</td>
+              <td>${catBadge}</td>
+              <td style="font-weight: 500;">${escapeHtml(r.program)}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+      } catch (e) {
+        console.error('Error loading public data:', e);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    document.addEventListener('DOMContentLoaded', loadPublicData);
+  </script>
+</body>
+</html>
