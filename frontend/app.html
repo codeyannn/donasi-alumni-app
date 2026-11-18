@@ -25,6 +25,7 @@
 
     <!-- Profile & Verification Banner -->
     <div id="verificationBanner" class="card" style="display: none; padding: 22px;"></div>
+    <div id="verificationHistoryBox" class="card" style="display: none; padding: 18px;"></div>
 
     <!-- Active Donation Intent Alert -->
     <div id="activeIntentBox" class="card" style="display: none; border-top: 3px solid var(--gold-500); background: #FFFDF9;"></div>
@@ -46,8 +47,9 @@
     </div>
 
     <!-- Donation Action Card -->
-    <div class="card">
+    <div class="card" id="donationCard">
       <h3 class="card-title">Salurkan Donasi</h3>
+      <div id="donationLockNotice" style="display: none; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px; font-size: 13px;"></div>
       <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 20px;">
         Pilih nominal dan bank tujuan. Sistem akan menerbitkan instruksi transfer dan memverifikasi mutasi bank secara otomatis.
       </p>
@@ -68,6 +70,14 @@
           </div>
 
           <div class="form-group">
+            <label for="paymentChannelSelect">Metode Pembayaran</label>
+            <select id="paymentChannelSelect" class="form-control" onchange="handleAlumniChannelChange()">
+              <option value="MANUAL_TRANSFER">Transfer Bank Manual (VA & QRIS 5 Bank)</option>
+              <option value="MIDTRANS_SNAP">Midtrans Snap Sandbox (Persiapan P5)</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="targetBankGroup">
             <label for="targetBank">Bank Tujuan Rekening IKA UPI</label>
             <select id="targetBank" class="form-control" required>
               <option value="BSI">Bank Syariah Indonesia (BSI)</option>
@@ -84,11 +94,7 @@
           <div class="form-group">
             <label for="programSelect">Alokasi Program</label>
             <select id="programSelect" class="form-control">
-              <option value="Beasiswa Alumni UPI">Beasiswa Alumni UPI (Reguler)</option>
-              <option value="Beasiswa Prestasi">Beasiswa Prestasi</option>
-              <option value="Beasiswa Afirmasi">Beasiswa Afirmasi</option>
-              <option value="Wakaf Pendidikan">Wakaf Sarana Pendidikan</option>
-              <option value="Infaq Operasional">Infaq Operasional & Pembinaan</option>
+              <option value="PRG-001">Beasiswa Alumni UPI (Reguler)</option>
             </select>
           </div>
 

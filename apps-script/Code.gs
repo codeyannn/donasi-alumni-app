@@ -6,28 +6,38 @@
 
 /**
  * Handles HTTP POST requests.
+ * All authenticated actions and webhook payloads arrive via POST JSON body
+ * (zero auth/webhook tokens accepted in URL query parameters).
  */
 function doPost(e) {
   try {
     const params = (e && e.parameter) ? e.parameter : {};
-    const pathAction = params.action || '';
 
-    // Route 1: Bank Webhook endpoint (authenticated via token query param)
-    const token = params.token;
-    const expectedToken = getConfig_('WEBHOOK_TOKEN');
+    // SEC-P0-5: Reject any authentication or webhook token sent via URL query string
+    if (params.token || params.id_token || params.access_token) {
+      return jsonResponse_(
+        {
+          status: 'error',
+          message: 'Forbidden: Authentication and webhook tokens must not be passed in URL query strings.',
+        },
+        400,
+      );
+    }
 
-    if (token && token === expectedToken) {
-      if (!e || !e.postData || !e.postData.contents) {
-        return jsonResponse_({ status: 'error', message: 'Missing POST body payload' }, 400);
-      }
-      let payload;
-      try {
-        payload = JSON.parse(e.postData.contents);
-      } catch (err) {
-        return jsonResponse_({ status: 'error', message: 'Invalid JSON payload: ' + err.message }, 400);
-      }
+    if (!e || !e.postData || !e.postData.contents) {
+      return jsonResponse_({ status: 'error', message: 'Missing POST JSON payload.' }, 400);
+    }
 
-      const mutations = Array.isArray(payload) ? payload : [payload];
+    let body = {};
+    try {
+      body = JSON.parse(e.postData.contents);
+    } catch (pErr) {
+      return jsonResponse_({ status: 'error', message: 'Invalid JSON payload.' }, 400);
+    }
+
+    // Route 1: Manual Bank Webhook endpoint (authenticated via HMAC-SHA256 + timestamp in JSON body)
+    if (body && body.webhook_auth && typeof body.payload_raw === 'string') {
+      const mutations = verifyManualWebhookAuth_(body);
       const result = handleWebhookMutations_(mutations);
       return jsonResponse_({
         status: 'ok',
@@ -39,17 +49,22 @@ function doPost(e) {
       });
     }
 
-    // Route 2: Application API Actions (authenticated via Google ID token)
-    let body = {};
-    if (e && e.postData && e.postData.contents) {
-      try {
-        body = JSON.parse(e.postData.contents);
-      } catch (pErr) {
-        body = {};
-      }
+    // Route 1b: Midtrans Server-to-Server Payment Notification Webhook (verified via SHA-512 signature_key)
+    if (
+      body &&
+      !body.action &&
+      body.order_id &&
+      body.status_code !== undefined &&
+      body.gross_amount !== undefined &&
+      body.signature_key
+    ) {
+      const mtResult = handleMidtransWebhook_(body);
+      return jsonResponse_(mtResult);
     }
 
-    const idToken = body.id_token || params.id_token || '';
+    // Route 2: Application API Actions (id_token strictly extracted from POST body only)
+    const pathAction = String(body.action || params.action || '').trim();
+    const idToken = typeof body.id_token === 'string' ? body.id_token : '';
 
     if (pathAction === 'register_or_login') {
       const user = registerOrLoginUser(idToken, body.role, body.consent);
@@ -62,7 +77,13 @@ function doPost(e) {
     }
 
     if (pathAction === 'review_verification') {
-      const res = reviewAlumniVerification(idToken, body.verif_id, body.approve, body.reason);
+      const decisionInput = body.decision !== undefined ? body.decision : body.approve;
+      const res = reviewAlumniVerification(idToken, body.verif_id, decisionInput, body.reason);
+      return jsonResponse_(res);
+    }
+
+    if (pathAction === 'admin_verif_proof') {
+      const res = getVerificationProofForAdmin(idToken, body.verif_id);
       return jsonResponse_(res);
     }
 
@@ -71,8 +92,13 @@ function doPost(e) {
       return jsonResponse_(res);
     }
 
-    if (pathAction === 'simulate_payment') {
-      const res = simulateIntentPayment(idToken, body.intent_id);
+    if (pathAction === 'create_guest_intent') {
+      const res = createGuestDonationIntent(body);
+      return jsonResponse_(res);
+    }
+
+    if (pathAction === 'simulate_payment' || pathAction === 'simulate_manual_payment') {
+      const res = simulateIntentPayment(idToken, body.intent_id, body.access_token);
       return jsonResponse_(res);
     }
 
@@ -81,21 +107,95 @@ function doPost(e) {
       return jsonResponse_(res);
     }
 
+    // Authenticated read operations moved from GET to POST (SEC-P0-5)
+    if (pathAction === 'my_donations') {
+      return jsonResponse_(getMyDonations(idToken));
+    }
+
+    if (pathAction === 'check_intent') {
+      return jsonResponse_(checkIntentStatus(idToken, body.intent_id, body.access_token));
+    }
+
+    if (pathAction === 'guest_lookup') {
+      return jsonResponse_(getGuestTransactionStatus(body.ref_code, body.access_token));
+    }
+
+    if (pathAction === 'rotate_guest_token') {
+      return jsonResponse_(rotateGuestAccessToken(body));
+    }
+
+    if (pathAction === 'get_receipt') {
+      return jsonResponse_(getReceiptData(body));
+    }
+
+    if (pathAction === 'admin_programs') {
+      return jsonResponse_(getAllProgramsAdmin(idToken));
+    }
+
+    if (pathAction === 'save_program') {
+      return jsonResponse_(saveProgramAdmin(idToken, body));
+    }
+
+    if (pathAction === 'delete_program') {
+      return jsonResponse_(deleteProgramAdmin(idToken, body.program_id));
+    }
+
+    if (pathAction === 'admin_verifications') {
+      return jsonResponse_(getAdminVerifications(idToken, body.filter_status));
+    }
+
+    if (pathAction === 'admin_queue') {
+      return jsonResponse_(getAdminReviewQueue(idToken));
+    }
+
+    if (pathAction === 'admin_insights') {
+      return jsonResponse_(getAdminInsights(idToken));
+    }
+
+    if (pathAction === 'admin_check_midtrans') {
+      return jsonResponse_(syncMidtransIntentStatusAdmin(idToken, body.intent_id));
+    }
+
+    if (pathAction === 'retry_tx_email') {
+      return jsonResponse_(retryTransactionEmail(idToken, body.tx_id));
+    }
+
+    if (pathAction === 'admin_transactions') {
+      return jsonResponse_(getAdminTransactions(idToken, body.filters));
+    }
+
+    if (pathAction === 'admin_audit_logs') {
+      return jsonResponse_(getAdminAuditLogs(idToken, body.limit, body.offset));
+    }
+
     return jsonResponse_({ status: 'error', message: 'Unauthorized or unknown POST action: ' + pathAction }, 401);
 
   } catch (err) {
+    // Return error message without echoing request parameters or secret values
     return jsonResponse_({ status: 'error', message: err.message || err.toString() }, 500);
   }
 }
 
 /**
  * Handles HTTP GET requests.
+ * Strictly restricted to unauthenticated public read endpoints without tokens.
  */
 function doGet(e) {
   try {
     const params = (e && e.parameter) ? e.parameter : {};
-    const action = params.action || 'public_summary';
-    const idToken = params.id_token || '';
+
+    // SEC-P0-5: Reject any token passed in GET URL query parameters
+    if (params.token || params.id_token || params.access_token) {
+      return jsonResponse_(
+        {
+          status: 'error',
+          message: 'Forbidden: Authentication tokens are not accepted in GET query strings. Use POST body.',
+        },
+        400,
+      );
+    }
+
+    const action = String(params.action || 'public_summary').trim();
 
     if (action === 'health') {
       return jsonResponse_({
@@ -109,24 +209,36 @@ function doGet(e) {
       return jsonResponse_(getPublicSummary());
     }
 
-    if (action === 'my_donations') {
-      return jsonResponse_(getMyDonations(idToken));
+    if (action === 'active_programs') {
+      return jsonResponse_(getActivePrograms());
     }
 
-    if (action === 'check_intent') {
-      return jsonResponse_(checkIntentStatus(idToken, params.intent_id));
-    }
-
-    if (action === 'admin_verifications') {
-      return jsonResponse_(getAdminVerifications(idToken));
-    }
-
-    if (action === 'admin_queue') {
-      return jsonResponse_(getAdminReviewQueue(idToken));
-    }
-
-    if (action === 'admin_insights') {
-      return jsonResponse_(getAdminInsights(idToken));
+    // Reject private/admin actions on GET and instruct POST transport
+    if (
+      action === 'my_donations' ||
+      action === 'check_intent' ||
+      action === 'guest_lookup' ||
+      action === 'rotate_guest_token' ||
+      action === 'get_receipt' ||
+      action === 'admin_verifications' ||
+      action === 'admin_verif_proof' ||
+      action === 'admin_queue' ||
+      action === 'admin_insights' ||
+      action === 'admin_programs' ||
+      action === 'save_program' ||
+      action === 'delete_program' ||
+      action === 'admin_check_midtrans' ||
+      action === 'retry_tx_email' ||
+      action === 'admin_transactions' ||
+      action === 'admin_audit_logs'
+    ) {
+      return jsonResponse_(
+        {
+          status: 'error',
+          message: 'Method Not Allowed: Private actions require POST with token in JSON body.',
+        },
+        405,
+      );
     }
 
     return jsonResponse_({ status: 'error', message: 'Unknown GET action: ' + action }, 404);

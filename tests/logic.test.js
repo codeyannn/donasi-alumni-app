@@ -84,10 +84,12 @@ it('extractRefCode decodes 12-digit Virtual Account from bank mutasi narration',
   assert.strictEqual(extractRefCode('TRSF CR VA MANDIRI 895082000012 BUDI'), 'G000012');
 });
 
-// 5. Donor Name Masking (UU PDP)
-it('maskDonorName respects privacy standards for various name shapes', () => {
-  assert.strictEqual(maskDonorName(''), 'Hamba Allah');
-  assert.strictEqual(maskDonorName(null), 'Hamba Allah');
+// 5. Donor Name Masking (UU PDP & OPEN-02 three-state separation)
+it('maskDonorName respects OPEN-02 three-state privacy standards', () => {
+  assert.strictEqual(maskDonorName(''), 'Pengirim Tidak Tercatat');
+  assert.strictEqual(maskDonorName(null), 'Pengirim Tidak Tercatat');
+  assert.strictEqual(maskDonorName('Ahmad Rizki', true), 'Seseorang');
+  assert.strictEqual(maskDonorName('', 'YES'), 'Seseorang');
   assert.strictEqual(maskDonorName('Ahmad'), 'A***d');
   assert.strictEqual(maskDonorName('Ahmad Rizki'), 'A***d R.');
   assert.strictEqual(maskDonorName('Siti Nurhaliza Putri'), 'S***i N.');

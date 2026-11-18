@@ -6,6 +6,7 @@
   <title>Donasi Beasiswa Ikatan Alumni UPI</title>
   <link rel="stylesheet" href="css/style.css">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -63,10 +64,10 @@
             Bukan Alumni / Simpatisan
           </h3>
           <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px; line-height: 1.5;">
-            Masyarakat umum atau donatur simpatisan dapat langsung menyalurkan donasi dengan ID Tamu tanpa kewajiban verifikasi ijazah.
+            Masyarakat umum atau donatur simpatisan dapat langsung menyalurkan donasi dengan kode referensi Tamu tanpa membuat akun atau login Google.
           </p>
-          <button class="btn btn-secondary" style="width: 100%;" onclick="startLoginFlow('GUEST')">
-            Masuk sebagai Tamu
+          <button class="btn btn-secondary" style="width: 100%;" onclick="openGuestCheckoutSection()">
+            Donasi Langsung (Tanpa Akun)
           </button>
         </div>
 
@@ -79,6 +80,98 @@
           <span>Saya menyetujui pemrosesan data untuk pencatatan donasi sesuai <strong>UU No. 27/2022 (Pelindungan Data Pribadi)</strong>. Identitas donatur disamarkan pada dasbor publik.</span>
         </label>
       </div>
+    </div>
+
+    <!-- Accountless Guest Donation Checkout Section (P4) -->
+    <div id="guestCheckoutSection" class="card" style="display: none; border-top: 3px solid var(--gold-500);">
+      <h3 class="card-title">Donasi Tamu Tanpa Akun (Non-Alumni)</h3>
+      <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px;">
+        Salurkan donasi langsung tanpa akun Google. Sistem menerbitkan kode referensi unik <code>G000xxx</code> dan token akses pribadi untuk melacak status serta bukti transaksi Anda.
+      </p>
+
+      <div id="guestActiveIntentBox" class="card" style="display: none; background: #FFFDF9; border: 1px solid var(--gold-500); margin-bottom: 18px;"></div>
+
+      <form id="guestCheckoutForm" onsubmit="handleGuestCheckoutSubmit(event)">
+        <div class="grid-cols-2">
+          <div class="form-group">
+            <label for="guestDonorName">Nama Lengkap Donatur</label>
+            <input type="text" id="guestDonorName" class="form-control" placeholder="Contoh: Budi Santoso" required>
+          </div>
+          <div class="form-group">
+            <label for="guestDonorEmail">Alamat Email (Untuk Kuitansi)</label>
+            <input type="email" id="guestDonorEmail" class="form-control" placeholder="nama@email.com" required>
+          </div>
+        </div>
+
+        <div class="grid-cols-2">
+          <div class="form-group">
+            <label for="guestAmount">Nominal Donasi (IDR)</label>
+            <input type="number" id="guestAmount" class="form-control" min="10000" step="5000" placeholder="Minimal 10000" required>
+          </div>
+          <div class="form-group">
+            <label for="guestProgramSelect">Program Donasi</label>
+            <select id="guestProgramSelect" class="form-control" required>
+              <option value="PRG-001">Beasiswa Alumni UPI</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-cols-2">
+          <div class="form-group">
+            <label for="guestPaymentChannel">Metode Pembayaran</label>
+            <select id="guestPaymentChannel" class="form-control" onchange="handleGuestChannelChange()">
+              <option value="MANUAL_TRANSFER">Transfer Bank Manual (VA & QRIS 5 Bank)</option>
+              <option value="MIDTRANS_SNAP">Midtrans Snap Sandbox (Persiapan P5)</option>
+            </select>
+          </div>
+          <div class="form-group" id="guestBankGroup">
+            <label for="guestBank">Bank Tujuan Rekening IKA UPI</label>
+            <select id="guestBank" class="form-control">
+              <option value="BCA">Bank Central Asia (BCA)</option>
+              <option value="BSI">Bank Syariah Indonesia (BSI)</option>
+              <option value="MANDIRI">Bank Mandiri</option>
+              <option value="BNI">Bank Negara Indonesia (BNI)</option>
+              <option value="BRI">Bank Rakyat Indonesia (BRI)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text-sub);">
+            <input type="checkbox" id="guestAnonCheck">
+            <span>Tampilkan donasi sebagai anonim ("Seseorang")</span>
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 12px; color: var(--text-dim);">
+            <input type="checkbox" id="guestConsentCheck" checked style="margin-top: 2px;">
+            <span>Saya menyetujui pemrosesan data nama & email donatur sesuai UU No. 27/2022.</span>
+          </label>
+        </div>
+
+        <button type="submit" id="btnGuestSubmitIntent" class="btn btn-primary">Buat Instruksi Donasi Tamu</button>
+      </form>
+    </div>
+
+    <!-- Secure Token-Protected Guest Status Lookup Section (OPEN-04) -->
+    <div id="guestLookupSection" class="card">
+      <h3 class="card-title">Lacak Status Donasi Tamu</h3>
+      <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 14px;">
+        Masukkan kode referensi Tamu (<code>G000xxx</code>) dan token akses pribadi Anda untuk melihat status transaksi.
+      </p>
+      <form onsubmit="handleGuestLookupSubmit(event)" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+        <div class="form-group" style="flex: 1; min-width: 160px; margin-bottom: 0;">
+          <label for="lookupGuestRef">Kode Referensi Tamu</label>
+          <input type="text" id="lookupGuestRef" class="form-control" placeholder="G000001" required>
+        </div>
+        <div class="form-group" style="flex: 2; min-width: 240px; margin-bottom: 0;">
+          <label for="lookupGuestToken">Access Token</label>
+          <input type="password" id="lookupGuestToken" class="form-control" placeholder="Token akses 64 karakter" required>
+        </div>
+        <button type="submit" class="btn btn-secondary">Cek Status</button>
+      </form>
+      <div id="guestLookupResult" style="display: none; margin-top: 14px;"></div>
     </div>
 
     <!-- Public Live Summary Section -->
@@ -104,26 +197,37 @@
       </div>
 
       <div style="margin-bottom: 12px;">
-        <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Mutasi Donasi Terkini</span>
-        <span style="font-size: 11px; color: var(--text-dim); margin-left: 8px;">(Nama Disamarkan Sesuai UU PDP)</span>
+        <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Rekapitulasi Agregat per Program &amp; Kanal Bank</span>
+        <span style="font-size: 11px; color: var(--text-dim); margin-left: 8px;">(Statistik Publik Agregat Murni Tanpa Data Individu)</span>
       </div>
 
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Tanggal</th>
-              <th>Bank</th>
-              <th>Nominal</th>
-              <th>Donatur</th>
-              <th>Status</th>
-              <th>Program</th>
-            </tr>
-          </thead>
-          <tbody id="pubRecentTable">
-            <tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 24px;">Memuat data mutasi terkini...</td></tr>
-          </tbody>
-        </table>
+      <div class="grid-cols-2">
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Program Donasi</th>
+                <th style="text-align: right;">Total Terhimpun</th>
+              </tr>
+            </thead>
+            <tbody id="pubProgramTable">
+              <tr><td colspan="2" style="text-align: center; color: var(--text-dim); padding: 20px;">Memuat agregat program...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Bank / Kanal Pembayaran</th>
+                <th style="text-align: right;">Total Terhimpun</th>
+              </tr>
+            </thead>
+            <tbody id="pubBankTable">
+              <tr><td colspan="2" style="text-align: center; color: var(--text-dim); padding: 20px;">Memuat agregat kanal...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -137,9 +241,10 @@
       
       <div id="googleBtnContainer" style="display: flex; justify-content: center; margin-bottom: 14px;"></div>
 
-      <div style="border-top: 1px dashed var(--border-mid); padding-top: 14px; margin-top: 14px;">
+      <!-- Demo UI rendered strictly in local development when explicitly enabled (SEC-P0-3) -->
+      <div id="demoLoginSection" style="display: none; border-top: 1px dashed var(--border-mid); padding-top: 14px; margin-top: 14px;">
         <button class="btn btn-secondary" style="font-size: 12px; width: 100%; border-style: dashed;" onclick="quickDemoLogin()">
-          Mode Demo Langsung
+          Mode Demo Lokal
         </button>
       </div>
 
@@ -154,17 +259,23 @@
   <script src="js/config.js"></script>
   <script src="js/api.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/guest.js"></script>
   <script>
     let selectedRole = 'ALUMNI';
 
-    function startLoginFlow(role) {
+    function startLoginFlow() {
       const consent = document.getElementById('privacyConsent').checked;
       if (!consent) {
         alert('Mohon centang persetujuan pemrosesan data pribadi terlebih dahulu.');
         return;
       }
-      selectedRole = role;
-      document.getElementById('modalTitle').innerText = (role === 'ALUMNI') ? 'Masuk sebagai Alumni UPI' : 'Masuk sebagai Tamu Umum';
+      // Google Sign-In strictly serves Alumni & backend-assigned Admin accounts (P4)
+      selectedRole = 'ALUMNI';
+      document.getElementById('modalTitle').innerText = 'Masuk sebagai Alumni UPI';
+      const demoBox = document.getElementById('demoLoginSection');
+      if (demoBox) {
+        demoBox.style.display = isLocalDemoEnabled() ? 'block' : 'none';
+      }
       document.getElementById('loginModal').style.display = 'flex';
       initGoogleButton();
     }
@@ -174,17 +285,23 @@
     }
 
     function quickDemoLogin() {
+      // Prevent demo token execution outside explicit local demo environments (SEC-P0-3)
+      if (!isLocalDemoEnabled()) {
+        alert('Mode Demo dinonaktifkan pada lingkungan produksi. Silakan masuk menggunakan akun Google.');
+        return;
+      }
       const consent = document.getElementById('privacyConsent').checked;
+      const safeRole = 'ALUMNI';
       API.post('register_or_login', {
-        id_token: 'mock_token_' + selectedRole.toLowerCase(),
-        role: selectedRole,
+        id_token: 'mock_token_' + safeRole.toLowerCase(),
+        role: safeRole,
         consent: consent,
-        email: selectedRole === 'ADMIN' ? 'maulanaa1408@upi.edu' : 'demo@alumni.upi.edu',
-        name: selectedRole === 'ALUMNI' ? 'Ahmad Rizki' : 'Budi Santoso'
+        email: 'demo@alumni.upi.edu',
+        name: 'Ahmad Rizki'
       }).then(res => {
         if (res.status === 'ok') {
           window.localStorage.setItem('DONASI_USER', JSON.stringify(res.user));
-          window.localStorage.setItem('DONASI_TOKEN', 'mock_token_' + selectedRole.toLowerCase());
+          window.localStorage.setItem('DONASI_TOKEN', 'mock_token_' + safeRole.toLowerCase());
           window.location.href = 'app.html';
         }
       });
@@ -195,35 +312,34 @@
         const data = await API.get('public_summary');
         if (data.status === 'ok') {
           document.getElementById('pubTotalAmount').innerText = data.formatted_total || 'Rp 0';
-          document.getElementById('pubTotalCount').innerText = `${data.total_count || 0} Mutasi`;
+          document.getElementById('pubTotalCount').innerText = `${data.total_count || 0} Transaksi`;
           document.getElementById('pubTodayAmount').innerText = data.formatted_today || 'Rp 0';
 
-          const tbody = document.getElementById('pubRecentTable');
-          tbody.innerHTML = '';
-          if (!data.recent_donations || data.recent_donations.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 24px;">Belum ada catatan mutasi donasi.</td></tr>';
-            return;
-          }
-
-          data.recent_donations.forEach(r => {
-            const tr = document.createElement('tr');
-            const catBadge = r.is_alumni 
-              ? '<span class="badge badge-alert">Alumni</span>' 
-              : '<span class="badge badge-neutral">Tamu</span>';
-            tr.innerHTML = `
-              <td>${escapeHtml(r.date)}</td>
-              <td><strong>${escapeHtml(r.bank)}</strong></td>
-              <td style="color: var(--crimson-700); font-weight: 700;">${escapeHtml(r.formatted_amount)}</td>
-              <td>${escapeHtml(r.donor)}</td>
-              <td>${catBadge}</td>
-              <td style="font-weight: 500;">${escapeHtml(r.program)}</td>
-            `;
-            tbody.appendChild(tr);
-          });
+          renderAggregateTable('pubProgramTable', data.by_program || {}, 'Belum ada agregat program.');
+          renderAggregateTable('pubBankTable', data.by_bank || {}, 'Belum ada agregat kanal.');
         }
       } catch (e) {
         console.error('Error loading public data:', e);
       }
+    }
+
+    function renderAggregateTable(tbodyId, mapObj, emptyText) {
+      const tbody = document.getElementById(tbodyId);
+      if (!tbody) return;
+      const entries = Object.entries(mapObj || {});
+      if (entries.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="2" style="text-align: center; color: var(--text-dim); padding: 20px;">${escapeHtml(emptyText)}</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = entries
+        .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+        .map(([label, val]) => `
+          <tr>
+            <td><strong>${escapeHtml(label)}</strong></td>
+            <td style="text-align: right; color: var(--crimson-700); font-weight: 700;">Rp ${Number(val || 0).toLocaleString('id-ID')}</td>
+          </tr>
+        `)
+        .join('');
     }
 
     function escapeHtml(str) {

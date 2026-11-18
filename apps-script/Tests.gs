@@ -37,13 +37,17 @@ function runSelfTests() {
     "Extracts G000012 from string",
   );
 
-  // 2. Masking Tests
+  // 2. Masking Tests (OPEN-02 three-state separation)
   assert(
-    maskDonorName("") === "Seseorang",
-    "Empty donor name defaults to Seseorang",
+    maskDonorName("") === "Pengirim Tidak Tercatat",
+    "Empty parsed donor name defaults to Pengirim Tidak Tercatat",
   );
   assert(
-    maskDonorName("Ahmad Rizki") === "A***d R.",
+    maskDonorName("Ahmad Rizki", true) === "Seseorang",
+    "Explicit anonymous donor renders as Seseorang",
+  );
+  assert(
+    maskDonorName("Ahmad Rizki", false) === "A***d R.",
     "Masks Ahmad Rizki -> A***d R.",
   );
   assert(
@@ -150,6 +154,146 @@ function runSelfTests() {
   assert(
     t2.status === "MATCHED" && t2.tier === 2,
     "Tier 2 matched uniquely via intent",
+  );
+
+  // 5. P1 Stabilization Tests: Non-account Guest Tier 1, Expired, Already Paid, & Anti-False-Match
+  const tGuest = matchTransaction(
+    {
+      bank: "BCA",
+      amount: 150000,
+      description: "PEMBAYARAN VA 390122000099 DONASI",
+    },
+    {
+      usersByRefCode: mockUsers,
+      pendingIntents: [
+        {
+          intent_id: "int_guest_1",
+          user_id: "",
+          ref_code: "G000099",
+          bank: "BCA",
+          amount: 150000,
+          status: "PENDING",
+          created_at: baseTime,
+          donor_name: "Tamu Non Akun",
+          donor_email: "guest@example.com",
+        },
+      ],
+      windowHours: 24,
+      now: baseTime,
+    },
+  );
+  assert(
+    tGuest.status === "MATCHED" && tGuest.tier === 1 && tGuest.intent_id === "int_guest_1",
+    "Tier 1 matches non-account Guest via donation_intents without users record",
+  );
+
+  const tExpired = matchTransaction(
+    {
+      bank: "BCA",
+      amount: 150000,
+      description: "PEMBAYARAN VA 390122000099 DONASI",
+    },
+    {
+      usersByRefCode: mockUsers,
+      pendingIntents: [
+        {
+          intent_id: "int_exp_1",
+          ref_code: "G000099",
+          bank: "BCA",
+          amount: 150000,
+          status: "PENDING",
+          created_at: new Date(baseTime.getTime() - 48 * 3600 * 1000),
+          expires_at: new Date(baseTime.getTime() - 24 * 3600 * 1000),
+        },
+      ],
+      windowHours: 24,
+      now: baseTime,
+    },
+  );
+  assert(
+    tExpired.status === "UNMATCHED" && tExpired.tier === 3,
+    "Expired intent is never auto-matched",
+  );
+
+  const tAlreadyPaid = matchTransaction(
+    {
+      bank: "BCA",
+      amount: 150000,
+      description: "PEMBAYARAN VA 390122000099 DONASI",
+    },
+    {
+      usersByRefCode: mockUsers,
+      pendingIntents: [
+        {
+          intent_id: "int_paid_1",
+          ref_code: "G000099",
+          bank: "BCA",
+          amount: 150000,
+          status: "MATCHED",
+          created_at: baseTime,
+        },
+      ],
+      windowHours: 24,
+      now: baseTime,
+    },
+  );
+  assert(
+    tAlreadyPaid.status === "UNMATCHED" && tAlreadyPaid.tier === 3,
+    "Already paid intent is routed to UNMATCHED review queue",
+  );
+
+  const tAlumniMismatch = matchTransaction(
+    {
+      bank: "BCA",
+      amount: 100000,
+      description: "TRSF CR A000471 BEASISWA",
+    },
+    {
+      usersByRefCode: mockUsers,
+      pendingIntents: [
+        {
+          intent_id: "int_alu_500k",
+          ref_code: "A000471",
+          bank: "BCA",
+          amount: 500000,
+          status: "PENDING",
+          created_at: baseTime,
+        },
+      ],
+      windowHours: 24,
+      now: baseTime,
+    },
+  );
+  assert(
+    tAlumniMismatch.status === "MATCHED" && tAlumniMismatch.intent_id === null,
+    "Alumni ref_code with different nominal does not false-close pending 500k intent",
+  );
+
+  // Test Group 8: P5 Midtrans Hybrid State Machine & Channel Normalization
+  const sigInput = buildMidtransSignatureInput("DON-A000471-123", "200", "150000.00", "SB-Mid-server-test");
+  assert(
+    sigInput === "DON-A000471-123200150000.00SB-Mid-server-test",
+    "buildMidtransSignatureInput preserves exact gross_amount decimal string",
+  );
+  assert(
+    normalizeMidtransChannel({ payment_type: "bank_transfer", va_numbers: [{ bank: "bca" }] }) === "MIDTRANS_BCA" &&
+      normalizeMidtransChannel({ payment_type: "echannel" }) === "MIDTRANS_MANDIRI" &&
+      normalizeMidtransChannel({ payment_type: "qris" }) === "MIDTRANS_QRIS",
+    "normalizeMidtransChannel maps VA, Mandiri echannel, and QRIS accurately",
+  );
+  const st404 = mapMidtransTransactionState("not_found_404", "");
+  const stChallenge = mapMidtransTransactionState("capture", "challenge");
+  const stSettle = mapMidtransTransactionState("settlement", "accept");
+  const stRefund = mapMidtransTransactionState("refund", "");
+  assert(
+    st404.intent_status === "PENDING" &&
+      stChallenge.intent_status === "PENDING" &&
+      !stChallenge.should_finalize_tx &&
+      stSettle.intent_status === "MATCHED" &&
+      stSettle.should_finalize_tx &&
+      stRefund.is_reversal === true &&
+      stRefund.gateway_status === "REFUNDED",
+    "mapMidtransTransactionState enforces 404/challenge hold, settlement finalization, and in-place reversal",
   );
 
   Logger.log(`--- SELF TESTS FINISHED: ${passed} Passed, ${failed} Failed ---`);

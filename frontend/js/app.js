@@ -8,6 +8,69 @@ let currentUser = null;
 let activePollingTimer = null;
 let activeIntentData = null;
 
+function normalizeFrontendStatus(status) {
+  const raw = String(status || '').trim().toUpperCase();
+  if (!raw || raw === 'NONE' || raw === 'NOT_SUBMITTED') return 'NOT_SUBMITTED';
+  if (raw === 'VERIFIED' || raw === 'APPROVED') return 'APPROVED';
+  if (raw === 'PENDING' || raw === 'NEEDS_REVISION' || raw === 'REJECTED') return raw;
+  return 'NOT_SUBMITTED';
+}
+
+function updateDonationFormAccess() {
+  const form = document.getElementById('intentForm');
+  const lockNotice = document.getElementById('donationLockNotice');
+  if (!form || !currentUser) return;
+
+  const isAlumni = String(currentUser.role || '').toUpperCase() === 'ALUMNI';
+  const normStatus = normalizeFrontendStatus(currentUser.verification_status);
+  const locked = isAlumni && normStatus !== 'APPROVED';
+
+  // Disable all interactive fields inside donation form when unapproved
+  const controls = form.querySelectorAll('input, select, button');
+  controls.forEach((el) => {
+    el.disabled = locked;
+  });
+  form.style.opacity = locked ? '0.55' : '1';
+  form.style.pointerEvents = locked ? 'none' : 'auto';
+
+  if (lockNotice) {
+    if (locked) {
+      lockNotice.style.display = 'block';
+      lockNotice.innerHTML =
+        normStatus === 'REJECTED'
+          ? '<strong>Formulir Donasi Alumni Terkunci:</strong> Verifikasi alumni Anda berstatus DITOLAK secara final (REJECTED). Anda tetap dapat berdonasi melalui jalur Tamu di <a href="index.html" style="color: #7F1D1D; text-decoration: underline;">halaman beranda</a>.'
+          : '<strong>Formulir Donasi Alumni Terkunci:</strong> Donasi khusus Alumni hanya tersedia setelah pengajuan verifikasi ijazah Anda berstatus <strong>APPROVED</strong> (Disetujui Admin). Status saat ini: <strong>' +
+            escapeApp(normStatus) +
+            '</strong>.';
+    } else {
+      lockNotice.style.display = 'none';
+      lockNotice.innerHTML = '';
+    }
+  }
+}
+
+async function loadActiveProgramsForDashboard() {
+  const select = document.getElementById('programSelect');
+  if (!select) return;
+  try {
+    const res = await API.get('active_programs');
+    if (res && res.status === 'ok' && Array.isArray(res.programs) && res.programs.length > 0) {
+      select.innerHTML = res.programs
+        .map((p) => `<option value="${escapeApp(p.program_id)}">${escapeApp(p.name)}</option>`)
+        .join('');
+    }
+  } catch (err) {
+    console.error('Failed loading active programs:', err);
+  }
+}
+
+function handleAlumniChannelChange() {
+  const sel = document.getElementById('paymentChannelSelect');
+  const group = document.getElementById('targetBankGroup');
+  if (!sel || !group) return;
+  group.style.display = sel.value === 'MIDTRANS_SNAP' ? 'none' : 'block';
+}
+
 async function initDashboard() {
   currentUser = getCurrentUser();
   if (!currentUser) {
@@ -16,6 +79,8 @@ async function initDashboard() {
   }
 
   renderVerificationStatusBanner();
+  updateDonationFormAccess();
+  await loadActiveProgramsForDashboard();
   await loadMyDonationsData();
 }
 
@@ -23,78 +88,128 @@ function setAmount(val) {
   document.getElementById('donationAmount').value = val;
 }
 
+function renderVerificationUploadFormHtml(heading, introHtml, prevReason) {
+  const revisionAlert = prevReason
+    ? `<div style="background: #FFFBEB; border-left: 4px solid #D97706; padding: 12px; margin-bottom: 16px; border-radius: var(--radius-sm); font-size: 13px; color: #92400E;">
+        <strong>Catatan Revisi dari Admin:</strong><br>${escapeApp(prevReason)}
+       </div>`
+    : '';
+
+  return `
+    <h3 class="card-title" style="color: var(--crimson-900);">${heading}</h3>
+    ${revisionAlert}
+    <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px;">
+      ${introHtml}
+    </p>
+    <form onsubmit="handleVerificationSubmit(event)" id="verifForm">
+      <div class="grid-cols-3" style="margin-bottom: 14px;">
+        <div class="form-group">
+          <label>Nomor Induk Mahasiswa (NIM)</label>
+          <input type="text" id="verifNim" class="form-control" placeholder="Contoh: 1802134" required>
+        </div>
+        <div class="form-group">
+          <label>Tahun Kelulusan</label>
+          <input type="number" id="verifYear" class="form-control" placeholder="Contoh: 2023" min="1960" max="2026" required>
+        </div>
+        <div class="form-group">
+          <label>Fakultas / Kampus Daerah</label>
+          <select id="verifFaculty" class="form-control" required>
+            <option value="FIP">FIP (Ilmu Pendidikan)</option>
+            <option value="FPIPS">FPIPS (Pendidikan Ilmu Pengetahuan Sosial)</option>
+            <option value="FPBS">FPBS (Pendidikan Bahasa & Sastra)</option>
+            <option value="FPMIPA">FPMIPA (Pendidikan Matematika & IPA)</option>
+            <option value="FPTK">FPTK (Pendidikan Teknologi & Kejuruan)</option>
+            <option value="FPOK">FPOK (Pendidikan Olahraga & Kesehatan)</option>
+            <option value="FPEB">FPEB (Pendidikan Ekonomi & Bisnis)</option>
+            <option value="FPSD">FPSD (Pendidikan Seni & Desain)</option>
+            <option value="Kampus Daerah">Kampus Daerah (Cibiru/Tasik/Purwakarta/Sumedang/Serang)</option>
+            <option value="SPs">Sekolah Pascasarjana (SPs)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Unggah Berkas Bukti (PDF / JPG / PNG, Max 5MB)</label>
+        <input type="file" id="verifFile" class="form-control" accept=".pdf,.png,.jpg,.jpeg" required>
+      </div>
+      <button type="submit" id="btnSubmitVerif" class="btn btn-primary">Kirim Berkas Verifikasi</button>
+    </form>
+  `;
+}
+
 function renderVerificationStatusBanner() {
   const banner = document.getElementById('verificationBanner');
   if (!banner) return;
 
+  const normStatus = normalizeFrontendStatus(currentUser.verification_status);
+
   if (currentUser.role === 'ALUMNI') {
-    if (currentUser.verification_status === 'VERIFIED') {
+    if (normStatus === 'APPROVED') {
       banner.style.display = 'block';
       banner.className = 'card notice-box verified';
+      banner.style.borderTop = '';
       banner.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
           <div>
-            <div style="font-size: 11px; font-weight: 700; color: var(--status-verified); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Status Terverifikasi</div>
+            <div style="font-size: 11px; font-weight: 700; color: var(--status-verified); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Status Terverifikasi (APPROVED)</div>
             <h4 style="font-family: var(--font-display); color: #065F46; font-size: 16px; margin-bottom: 4px;">Alumni UPI Resmi</h4>
             <p style="font-size: 13px; color: #047857; margin: 0;">
               ID Donatur Alumni Anda: <strong class="id-badge">${escapeApp(currentUser.ref_code)}</strong>. Setiap transfer dana atau pembayaran Virtual Account otomatis dicatat atas nama Anda.
             </p>
           </div>
-          <span class="badge badge-verified">Terverifikasi</span>
+          <span class="badge badge-verified">APPROVED</span>
         </div>
       `;
-    } else if (currentUser.verification_status === 'PENDING') {
+    } else if (normStatus === 'PENDING') {
       banner.style.display = 'block';
       banner.className = 'card notice-box pending';
+      banner.style.borderTop = '';
       banner.innerHTML = `
-        <div style="font-size: 11px; font-weight: 700; color: var(--gold-600); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Sedang Ditinjau</div>
+        <div style="font-size: 11px; font-weight: 700; color: var(--gold-600); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Sedang Ditinjau (PENDING)</div>
         <h4 style="font-family: var(--font-display); color: #92400E; font-size: 16px; margin-bottom: 4px;">Pengajuan Verifikasi Sedang Diproses Admin</h4>
         <p style="font-size: 13px; color: #B45309; margin: 0; line-height: 1.5;">
-          Dokumen kelulusan Anda sedang ditinjau. Begitu disetujui, kode ID Unik Alumni (A000xxx) akan diterbitkan dan dikirimkan ke email Anda.
+          Dokumen kelulusan Anda sedang ditinjau. Begitu disetujui, kode ID Unik Alumni (A000xxx) akan diterbitkan dan dikirimkan ke email Anda. Formulir donasi alumni akan terbuka setelah disetujui.
         </p>
+      `;
+    } else if (normStatus === 'NEEDS_REVISION') {
+      banner.style.display = 'block';
+      banner.className = 'card';
+      banner.style.borderTop = '3px solid var(--gold-600)';
+      banner.innerHTML = renderVerificationUploadFormHtml(
+        'Perlu Revisi Berkas Verifikasi Alumni',
+        'Mohon unggah ulang berkas bukti kelulusan UPI sesuai catatan admin agar pengajuan dapat ditinjau kembali.',
+        currentUser.reject_reason || ''
+      );
+    } else if (normStatus === 'REJECTED') {
+      // OPEN-01: REJECTED is terminal; do not render any re-submission upload form
+      banner.style.display = 'block';
+      banner.className = 'card notice-box';
+      banner.style.background = '#FEF2F2';
+      banner.style.border = '1px solid #FECACA';
+      banner.style.borderTop = '3px solid #DC2626';
+      banner.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <div style="font-size: 11px; font-weight: 700; color: #DC2626; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Keputusan Final (REJECTED)</div>
+            <h4 style="font-family: var(--font-display); color: #991B1B; font-size: 16px; margin-bottom: 6px;">Pengajuan Verifikasi Ditolak Secara Final</h4>
+            <p style="font-size: 13px; color: #7F1D1D; margin: 0 0 8px 0; line-height: 1.5;">
+              <strong>Alasan:</strong> ${escapeApp(currentUser.reject_reason || 'Dokumen bukti tidak sesuai ketentuan kelulusan UPI.')}
+            </p>
+            <p style="font-size: 12px; color: #991B1B; margin: 0;">
+              Sesuai kebijakan sistem, status REJECTED bersifat final dan pengajuan ulang alumni dinonaktifkan. Anda tetap dapat berdonasi melalui jalur Tamu di <a href="index.html" style="text-decoration: underline; color: #7F1D1D;">beranda</a>.
+            </p>
+          </div>
+          <span class="badge badge-alert">REJECTED</span>
+        </div>
       `;
     } else {
       banner.style.display = 'block';
       banner.className = 'card';
       banner.style.borderTop = '3px solid var(--crimson-700)';
-      banner.innerHTML = `
-        <h3 class="card-title" style="color: var(--crimson-900);">Verifikasi Status Kelulusan Alumni UPI</h3>
-        <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 18px;">
-          Untuk memperoleh ID resmi alumni (A000xxx) dan penerbitan nomor Virtual Account khusus alumni, mohon lengkapi verifikasi berikut. Berkas bukti akan otomatis dihapus oleh sistem setelah diverifikasi (UU No. 27/2022).
-        </p>
-        <form onsubmit="handleVerificationSubmit(event)" id="verifForm">
-          <div class="grid-cols-3" style="margin-bottom: 14px;">
-            <div class="form-group">
-              <label>Nomor Induk Mahasiswa (NIM)</label>
-              <input type="text" id="verifNim" class="form-control" placeholder="Contoh: 1802134" required>
-            </div>
-            <div class="form-group">
-              <label>Tahun Kelulusan</label>
-              <input type="number" id="verifYear" class="form-control" placeholder="Contoh: 2023" min="1960" max="2026" required>
-            </div>
-            <div class="form-group">
-              <label>Fakultas / Kampus Daerah</label>
-              <select id="verifFaculty" class="form-control" required>
-                <option value="FIP">FIP (Ilmu Pendidikan)</option>
-                <option value="FPIPS">FPIPS (Pendidikan Ilmu Pengetahuan Sosial)</option>
-                <option value="FPBS">FPBS (Pendidikan Bahasa & Sastra)</option>
-                <option value="FPMIPA">FPMIPA (Pendidikan Matematika & IPA)</option>
-                <option value="FPTK">FPTK (Pendidikan Teknologi & Kejuruan)</option>
-                <option value="FPOK">FPOK (Pendidikan Olahraga & Kesehatan)</option>
-                <option value="FPEB">FPEB (Pendidikan Ekonomi & Bisnis)</option>
-                <option value="FPSD">FPSD (Pendidikan Seni & Desain)</option>
-                <option value="Kampus Daerah">Kampus Daerah (Cibiru/Tasik/Purwakarta/Sumedang/Serang)</option>
-                <option value="SPs">Sekolah Pascasarjana (SPs)</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Unggah Berkas Bukti (PDF / JPG / PNG, Max 5MB)</label>
-            <input type="file" id="verifFile" class="form-control" accept=".pdf,.png,.jpg,.jpeg" required>
-          </div>
-          <button type="submit" id="btnSubmitVerif" class="btn btn-primary">Kirim Berkas Verifikasi</button>
-        </form>
-      `;
+      banner.innerHTML = renderVerificationUploadFormHtml(
+        'Verifikasi Status Kelulusan Alumni UPI',
+        'Untuk memperoleh ID resmi alumni (A000xxx) dan membuka akses donasi alumni, mohon lengkapi verifikasi berikut. Berkas bukti akan otomatis dihapus oleh sistem setelah ditinjau (UU No. 27/2022).',
+        ''
+      );
     }
   } else {
     banner.style.display = 'block';
@@ -116,6 +231,46 @@ function renderVerificationStatusBanner() {
   }
 }
 
+function renderVerificationHistory(history) {
+  const box = document.getElementById('verificationHistoryBox');
+  if (!box) return;
+  if (!Array.isArray(history) || history.length === 0 || (currentUser && currentUser.role !== 'ALUMNI')) {
+    box.style.display = 'none';
+    return;
+  }
+
+  box.style.display = 'block';
+  const rowsHtml = history.map((item) => `
+    <tr>
+      <td style="font-family: var(--font-mono); font-size: 11px;">${escapeApp(item.verif_id)}</td>
+      <td>${escapeApp(item.submitted_at || '-')}</td>
+      <td>${escapeApp(item.nim)} (${escapeApp(item.faculty)}, ${escapeApp(item.grad_year)})</td>
+      <td><span class="badge badge-neutral">${escapeApp(item.status)}</span></td>
+      <td style="font-size: 12px; color: var(--text-sub);">${escapeApp(item.reject_reason || '-')}</td>
+    </tr>
+  `).join('');
+
+  box.innerHTML = `
+    <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--text-main);">
+      Riwayat Pengajuan & Keputusan Verifikasi
+    </h4>
+    <div class="table-responsive">
+      <table>
+        <thead>
+          <tr>
+            <th>ID Tiket</th>
+            <th>Waktu Ajuan</th>
+            <th>Data Akademik</th>
+            <th>Status</th>
+            <th>Catatan Reviewer</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 async function handleVerificationSubmit(e) {
   e.preventDefault();
   const nim = document.getElementById('verifNim').value;
@@ -129,6 +284,11 @@ async function handleVerificationSubmit(e) {
   }
 
   const file = fileInput.files[0];
+  const allowedMimes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
+  if (!allowedMimes.includes((file.type || '').toLowerCase()) || file.size > 5 * 1024 * 1024) {
+    alert('Format berkas wajib PDF, JPG, atau PNG dengan ukuran maksimal 5MB.');
+    return;
+  }
   const btn = document.getElementById('btnSubmitVerif');
   btn.disabled = true;
   btn.innerText = 'Mengunggah & Memproses...';
@@ -152,6 +312,7 @@ async function handleVerificationSubmit(e) {
         currentUser.verification_status = 'PENDING';
         window.localStorage.setItem('DONASI_USER', JSON.stringify(currentUser));
         renderVerificationStatusBanner();
+        updateDonationFormAccess();
       } else {
         alert('Gagal mengirim verifikasi: ' + (res.message || 'Error'));
       }
@@ -168,31 +329,49 @@ async function handleVerificationSubmit(e) {
 async function handleCreateIntent(e) {
   e.preventDefault();
   const amount = parseFloat(document.getElementById('donationAmount').value);
-  const bank = document.getElementById('targetBank').value;
-  const program = document.getElementById('programSelect').value;
+  const channelSel = document.getElementById('paymentChannelSelect');
+  const channel = channelSel ? channelSel.value : 'MANUAL_TRANSFER';
+  const bank = channel === 'MIDTRANS_SNAP' ? 'MIDTRANS' : document.getElementById('targetBank').value;
+  const programSelect = document.getElementById('programSelect');
+  const programVal = programSelect ? programSelect.value : 'PRG-001';
+  const programText =
+    programSelect && programSelect.selectedIndex >= 0
+      ? programSelect.options[programSelect.selectedIndex].text
+      : programVal;
   const isAnon = document.getElementById('anonCheck').checked;
 
-  if (currentUser.role === 'ALUMNI' && currentUser.verification_status !== 'VERIFIED') {
-    alert('Mohon tunggu verifikasi alumni disetujui terlebih dahulu agar donasi Anda tercatat dengan ID Alumni.');
+  if (currentUser.role === 'ALUMNI' && normalizeFrontendStatus(currentUser.verification_status) !== 'APPROVED') {
+    alert('Mohon tunggu verifikasi alumni disetujui (APPROVED) terlebih dahulu agar donasi Anda tercatat dengan ID Alumni.');
     return;
   }
 
   const btn = document.getElementById('btnSubmitIntent');
   btn.disabled = true;
-  btn.innerText = 'Membuat Virtual Account & QRIS...';
+  btn.innerText = channel === 'MIDTRANS_SNAP' ? 'Menyiapkan Midtrans Order...' : 'Membuat Virtual Account & QRIS...';
+  const requestId =
+    typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function'
+      ? window.crypto.randomUUID()
+      : 'ALU_' + Date.now();
 
   try {
     const res = await API.post('create_intent', {
       id_token: getAuthToken(),
       amount: amount,
+      payment_channel: channel,
       bank: bank,
-      program: program,
-      is_anonymous: isAnon
+      program_id: /^PRG-/i.test(programVal) ? programVal : '',
+      program: programText,
+      is_anonymous: isAnon,
+      client_request_id: requestId
     });
 
     if (res.status === 'ok') {
       activeIntentData = res;
-      showTransferInstructionModal(res);
+      if (res.payment_channel === 'MIDTRANS_SNAP') {
+        showMidtransPreparedModal(res);
+      } else {
+        showTransferInstructionModal(res);
+      }
       startRealtimePolling(res.intent_id);
     } else {
       alert('Gagal membuat instruksi donasi: ' + (res.message || 'Error'));
@@ -202,6 +381,109 @@ async function handleCreateIntent(e) {
   } finally {
     btn.disabled = false;
     btn.innerText = 'Lanjutkan ke Instruksi Transfer';
+  }
+}
+
+/**
+ * Dynamically injects Midtrans snap.js when CONFIG.MIDTRANS_CLIENT_KEY is configured.
+ */
+function ensureMidtransSnapLoaded_() {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      resolve(false);
+      return;
+    }
+    if (window.snap && typeof window.snap.pay === 'function') {
+      resolve(true);
+      return;
+    }
+    const clientKey = (window.CONFIG && window.CONFIG.MIDTRANS_CLIENT_KEY) || '';
+    if (!clientKey) {
+      resolve(false);
+      return;
+    }
+    const existing = document.getElementById('midtransSnapScript');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(Boolean(window.snap)));
+      existing.addEventListener('error', () => resolve(false));
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = 'midtransSnapScript';
+    script.src =
+      (window.CONFIG && window.CONFIG.MIDTRANS_SNAP_URL) ||
+      'https://app.sandbox.midtrans.com/snap/snap.js';
+    script.setAttribute('data-client-key', clientKey);
+    script.onload = () => resolve(Boolean(window.snap));
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Opens Midtrans Snap popup for a given snap_token while keeping 5-second active inquiry polling active.
+ */
+async function openAlumniMidtransSnap(snapToken) {
+  if (!snapToken) return;
+  const loaded = await ensureMidtransSnapLoaded_();
+  if (loaded && window.snap && typeof window.snap.pay === 'function') {
+    window.snap.pay(snapToken, {
+      onSuccess: function () {
+        if (activeIntentData && activeIntentData.intent_id) {
+          startRealtimePolling(activeIntentData.intent_id);
+        }
+      },
+      onPending: function () {
+        if (activeIntentData && activeIntentData.intent_id) {
+          startRealtimePolling(activeIntentData.intent_id);
+        }
+      },
+      onError: function (err) {
+        console.warn('Midtrans Snap error:', err);
+      }
+    });
+  } else if (activeIntentData && activeIntentData.redirect_url) {
+    window.open(activeIntentData.redirect_url, '_blank', 'noopener,noreferrer');
+  } else {
+    alert('Kredensial MIDTRANS_CLIENT_KEY Sandbox belum diaktifkan pada konfigurasi frontend (OPEN-05).');
+  }
+}
+
+function showMidtransPreparedModal(res) {
+  const box = document.getElementById('activeIntentBox');
+  if (!box) return;
+  const hasSnapToken = Boolean(res.snap_token);
+  const actionBtnHtml = hasSnapToken
+    ? `<div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+         <button type="button" class="btn btn-primary" style="font-size: 12px; padding: 8px 14px;" onclick="openAlumniMidtransSnap('${escapeApp(res.snap_token)}')">
+           Bayar Sekarang via Midtrans Snap
+         </button>
+       </div>`
+    : `<div style="margin-top: 8px;">Intent Midtrans Snap telah tercatat aman. Popup Snap aktif otomatis setelah kredensial Midtrans Sandbox (OPEN-05) dipasang.</div>`;
+
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+      <div>
+        <span class="badge badge-pending" style="margin-bottom: 4px;">Midtrans Snap (${escapeApp(res.order_id || '-')})</span>
+        <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--crimson-900);">
+          Pembayaran Donasi: ${escapeApp(res.formatted_amount)}
+        </h3>
+      </div>
+      <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="closeInstructionBox()">Tutup</button>
+    </div>
+    <div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: var(--radius-sm); padding: 14px; font-size: 13px; color: #78350F; margin-bottom: 12px;">
+      <div><strong>Program:</strong> ${escapeApp(res.program)}</div>
+      <div><strong>Nominal Kotor (Gross):</strong> ${escapeApp(res.formatted_amount)} &bull; <strong>Biaya Gateway:</strong> Rp 0 (${escapeApp(res.sandbox_notice || 'Mode Sandbox')})</div>
+      ${actionBtnHtml}
+    </div>
+    <div style="background: #FFFDF9; border: 1px solid var(--gold-500); border-radius: var(--radius-sm); padding: 12px; font-size: 12px; color: var(--gold-600); font-weight: 600;" id="pollingStatusLabel">
+      Memantau status pembayaran Midtrans secara otomatis setiap 5 detik...
+    </div>
+  `;
+
+  if (hasSnapToken) {
+    openAlumniMidtransSnap(res.snap_token);
   }
 }
 
@@ -368,7 +650,8 @@ function startRealtimePolling(intentId) {
     if (secondsLeft <= 0) {
       secondsLeft = 5;
       try {
-        const check = await API.get('check_intent', {
+        // Send polling auth token via POST body rather than URL query string (SEC-P0-5)
+        const check = await API.post('check_intent', {
           id_token: getAuthToken(),
           intent_id: intentId
         });
@@ -442,13 +725,17 @@ async function triggerSimulatedPayment(intentId) {
 
 async function loadMyDonationsData() {
   try {
-    const data = await API.get('my_donations', { id_token: getAuthToken() });
+    // Transmit id_token inside POST body instead of GET query string (SEC-P0-5)
+    const data = await API.post('my_donations', { id_token: getAuthToken() });
     if (data.status === 'ok') {
       if (data.user) {
         currentUser = { ...currentUser, ...data.user };
         window.localStorage.setItem('DONASI_USER', JSON.stringify(currentUser));
         document.getElementById('myRefCodeDisplay').innerText = currentUser.ref_code || 'BELUM TERVERIFIKASI';
+        renderVerificationStatusBanner();
+        updateDonationFormAccess();
       }
+      renderVerificationHistory(data.verification_history || []);
 
       document.getElementById('myTotalDonated').innerText = data.summary.formatted_total || 'Rp 0';
       document.getElementById('myTxCount').innerText = `${data.summary.total_count || 0} Kali`;
@@ -463,13 +750,23 @@ async function loadMyDonationsData() {
 
       data.history.forEach(item => {
         const tr = document.createElement('tr');
+        const txTarget = item.tx_id || item.id || '';
+        const receiptBadgeHtml =
+          item.gateway_status === 'REFUNDED' || item.gateway_status === 'PARTIAL_REFUNDED' || item.gateway_status === 'CHARGEBACK'
+            ? `<span class="badge badge-alert">${escapeApp(item.gateway_status)}</span>`
+            : item.receipt_no || txTarget
+            ? `<a href="receipt.html#tx=${encodeURIComponent(txTarget)}" class="badge badge-verified" style="text-decoration: underline;">
+                 ${escapeApp(item.receipt_no || 'Lihat Kuitansi')}
+               </a>`
+            : `<span class="badge badge-verified">Terverifikasi</span>`;
+
         tr.innerHTML = `
           <td>${escapeApp(item.date)}</td>
           <td><strong>${escapeApp(item.bank)}</strong></td>
           <td style="color: var(--crimson-700); font-weight: 700;">${escapeApp(item.formatted_amount)}</td>
           <td>${escapeApp(item.program)}</td>
           <td><span class="id-badge" style="font-size: 12px;">${escapeApp(item.ref_code || '-')}</span></td>
-          <td><span class="badge badge-verified">Terverifikasi</span></td>
+          <td>${receiptBadgeHtml}</td>
         `;
         tbody.appendChild(tr);
       });

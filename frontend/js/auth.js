@@ -3,6 +3,12 @@
  * Google Identity Services initialization and session management.
  */
 
+function isLocalDemoEnabled() {
+  if (!CONFIG || CONFIG.DEMO_MODE !== true) return false;
+  const host = window.location && window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1";
+}
+
 function initGoogleButton() {
   const container = document.getElementById("googleBtnContainer");
   if (!container) return;
@@ -21,7 +27,7 @@ function initGoogleButton() {
     });
   } else {
     container.innerHTML =
-      '<span style="font-size: 12px; color: var(--text-dim);">Google Client ID belum diatur. Gunakan Mode Demo di bawah untuk pengujian langsung.</span>';
+      '<span style="font-size: 12px; color: var(--text-dim);">Google Client ID belum diatur atau pustaka Google Sign-In masih dimuat.</span>';
   }
 }
 
@@ -31,10 +37,13 @@ async function handleGoogleCredentialResponse(response) {
     ? document.getElementById("privacyConsent").checked
     : true;
 
+  // Enforce Alumni-only role on Google Sign-In; GUEST donations no longer use Google Auth (P4)
+  const normalizedRole = "ALUMNI";
+
   try {
     const res = await API.post("register_or_login", {
       id_token: idToken,
-      role: selectedRole || "ALUMNI",
+      role: normalizedRole,
       consent: consent,
     });
 
@@ -78,8 +87,9 @@ function renderNavRight() {
           ? '<span class="badge badge-alert">ALUMNI</span>'
           : '<span class="badge badge-neutral">TAMU</span>';
 
+    // Display admin portal button strictly based on server-derived ADMIN role
     const adminLink =
-      user.role === "ADMIN" || user.email === "maulanaa1408@upi.edu"
+      user.role === "ADMIN"
         ? '<a href="admin.html" class="btn btn-secondary" style="font-size: 11px; padding: 5px 10px; margin-right: 6px;">Portal Admin</a>'
         : "";
 

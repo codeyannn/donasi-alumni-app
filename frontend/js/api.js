@@ -3,12 +3,26 @@
  * API communication layer with Google Apps Script backend and offline mock fallbacks.
  */
 
+/**
+ * Returns true only when DEMO_MODE is explicitly enabled on a local loopback host.
+ */
+function isLocalDemoAllowed_() {
+  if (!CONFIG || CONFIG.DEMO_MODE !== true) return false;
+  if (typeof window === 'undefined' || !window.location) return false;
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
 const API = {
   /**
-   * Performs GET request to Apps Script Web App.
+   * Performs GET request to Apps Script Web App strictly for public endpoints without tokens.
    */
   async get(action, params = {}) {
-    if (CONFIG.DEMO_MODE || !CONFIG.API_URL) {
+    // Prevent accidental leakage of authentication or access tokens via GET query strings
+    if (params.id_token || params.token || params.access_token) {
+      throw new Error('Security Error: Authentication tokens must be transmitted via POST JSON body.');
+    }
+    if (isLocalDemoAllowed_() || !CONFIG.API_URL) {
       return this.mockGet(action, params);
     }
     const query = new URLSearchParams({ action, ...params });
@@ -17,16 +31,19 @@ const API = {
   },
 
   /**
-   * Performs POST request to Apps Script Web App.
+   * Performs POST request to Apps Script Web App using CORS-safe text/plain JSON payload.
+   * Avoids browser OPTIONS preflight failures against Google Apps Script Web Apps.
    */
   async post(action, data = {}) {
-    if (CONFIG.DEMO_MODE || !CONFIG.API_URL) {
+    if (isLocalDemoAllowed_() || !CONFIG.API_URL) {
       return this.mockPost(action, data);
     }
+    // Embed action and tokens inside POST body while using text/plain to bypass CORS preflight
+    const payload = { action, ...data };
     const res = await fetch(`${CONFIG.API_URL}?action=${encodeURIComponent(action)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
     });
     return await res.json();
   },
@@ -45,17 +62,55 @@ const API = {
         today_amount: 1500000,
         formatted_today: 'Rp 1.500.000',
         by_bank: { 'BSI': 6500000, 'MANDIRI': 4000000, 'BCA': 5000000, 'BNI': 2000000, 'BRI': 1000000 },
-        by_program: { 'Beasiswa Alumni UPI': 12000000, 'Wakaf Pendidikan': 3500000, 'Infaq Operasional': 3000000 },
-        recent_donations: [
-          { date: '2026-11-11', bank: 'BCA', amount: 500000, formatted_amount: 'Rp 500.000', donor: 'A***d R.', is_alumni: true, program: 'Beasiswa Alumni UPI' },
-          { date: '2026-11-11', bank: 'BSI', amount: 1000000, formatted_amount: 'Rp 1.000.000', donor: 'M***d R.', is_alumni: true, program: 'Beasiswa Alumni UPI' },
-          { date: '2026-11-10', bank: 'MANDIRI', amount: 250000, formatted_amount: 'Rp 250.000', donor: 'S***i N.', is_alumni: false, program: 'Infaq Operasional' }
+        by_program: { 'Beasiswa Alumni UPI': 12000000, 'Wakaf Pendidikan': 3500000, 'Infaq Operasional': 3000000 }
+      });
+    }
+
+    if (action === 'active_programs') {
+      return Promise.resolve({
+        status: 'ok',
+        schema_ready: true,
+        programs: [
+          { program_id: 'PRG-001', name: 'Beasiswa Alumni UPI', description: 'Program reguler beasiswa UKT mahasiswa UPI', is_active: true },
+          { program_id: 'PRG-002', name: 'Beasiswa Prestasi', description: 'Dukungan mahasiswa berprestasi', is_active: true },
+          { program_id: 'PRG-003', name: 'Beasiswa Afirmasi', description: 'Bantuan mahasiswa afirmasi', is_active: true },
+          { program_id: 'PRG-004', name: 'Wakaf Pendidikan', description: 'Pengembangan sarana pendidikan', is_active: true },
+          { program_id: 'PRG-005', name: 'Infaq Operasional', description: 'Dukungan operasional pembinaan', is_active: true }
         ]
       });
     }
 
     if (action === 'check_intent') {
-      const intentId = params.intent_id;
+      return this.mockPost(action, params);
+    }
+
+    if (action === 'my_donations' || action === 'admin_verifications' || action === 'admin_queue' || action === 'admin_insights') {
+      return this.mockPost(action, params);
+    }
+
+    return Promise.resolve({ status: 'ok' });
+  },
+
+  /**
+   * Mock POST dispatcher (for local offline dev only).
+   */
+  mockPost(action, data) {
+    if (action === 'active_programs') {
+      return Promise.resolve({
+        status: 'ok',
+        schema_ready: true,
+        programs: [
+          { program_id: 'PRG-001', name: 'Beasiswa Alumni UPI', description: 'Program reguler beasiswa UKT mahasiswa UPI', is_active: true },
+          { program_id: 'PRG-002', name: 'Beasiswa Prestasi', description: 'Dukungan mahasiswa berprestasi', is_active: true },
+          { program_id: 'PRG-003', name: 'Beasiswa Afirmasi', description: 'Bantuan mahasiswa afirmasi', is_active: true },
+          { program_id: 'PRG-004', name: 'Wakaf Pendidikan', description: 'Pengembangan sarana pendidikan', is_active: true },
+          { program_id: 'PRG-005', name: 'Infaq Operasional', description: 'Dukungan operasional pembinaan', is_active: true }
+        ]
+      });
+    }
+
+    if (action === 'check_intent') {
+      const intentId = data.intent_id;
       const db = JSON.parse(window.localStorage.getItem('MOCK_PAID_INTENTS') || '[]');
       const isPaid = db.includes(intentId);
       return Promise.resolve({
@@ -119,13 +174,6 @@ const API = {
       });
     }
 
-    return Promise.resolve({ status: 'ok' });
-  },
-
-  /**
-   * Mock POST dispatcher.
-   */
-  mockPost(action, data) {
     if (action === 'register_or_login') {
       const role = data.role || 'GUEST';
       const refCode = (role === 'GUEST') ? 'G000012' : (role === 'ADMIN' ? 'A000001' : '');
@@ -217,6 +265,36 @@ const API = {
 
     if (action === 'resolve_queue') {
       return Promise.resolve({ status: 'ok', assigned_ref_code: data.target_ref_code });
+    }
+
+    if (action === 'create_guest_intent') {
+      return Promise.resolve({
+        status: 'ok',
+        intent_id: 'INT_GUEST_DEMO',
+        ref_code: 'G000099',
+        donor_type: 'GUEST',
+        payment_channel: data.payment_channel || 'MANUAL_TRANSFER',
+        bank: data.bank || 'BCA',
+        amount: data.amount || 100000,
+        formatted_amount: 'Rp ' + Number(data.amount || 100000).toLocaleString('id-ID'),
+        program: data.program || 'Beasiswa Alumni UPI',
+        program_id: data.program_id || 'PRG-001',
+        access_token: 'demo_token_offline_preview_only_00000000000000000000000000000000'
+      });
+    }
+
+    if (action === 'admin_programs') {
+      return this.mockGet('active_programs', {});
+    }
+
+    if (action === 'rotate_guest_token') {
+      return Promise.resolve({
+        status: 'ok',
+        intent_id: data.intent_id || 'INT_GUEST_DEMO',
+        ref_code: data.ref_code || 'G000099',
+        token_rotated: true,
+        access_token: data.access_token ? 'rotated_demo_token_offline_preview_00000000000000000000000000' : undefined
+      });
     }
 
     return Promise.resolve({ status: 'ok' });

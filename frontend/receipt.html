@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bukti Kuitansi Resmi Donasi — Beasiswa Ikatan Alumni UPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700;9..144,800&family=IBM+Plex+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Top Institutional Navigation (Hidden on Print) -->
+  <header class="navbar no-print">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand" style="text-decoration: none;">
+        <div class="brand-emblem">UPI</div>
+        <div>
+          <div class="brand-title">Beasiswa Ikatan Alumni UPI</div>
+          <div class="brand-sub">Portal Kuitansi &amp; Verifikasi Dana Resmi</div>
+        </div>
+      </a>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <a href="index.html" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; text-decoration: none;">Beranda</a>
+        <a href="app.html" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; text-decoration: none;">Dasbor Alumni</a>
+        <button id="btnPrintReceipt" type="button" class="btn btn-primary" style="display: none; font-size: 12px; padding: 7px 14px;" onclick="window.print()">
+          Cetak / Simpan PDF
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" style="padding-top: 32px; padding-bottom: 64px; max-width: 780px;">
+    <!-- Loading / Error Banner -->
+    <div id="receiptStateBanner" class="card no-print" style="margin-bottom: 20px; text-align: center; padding: 24px;">
+      <div id="receiptStateTitle" style="font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--crimson-900); margin-bottom: 6px;">
+        Memuat Bukti Kuitansi Resmi...
+      </div>
+      <p id="receiptStateMessage" style="font-size: 13px; color: var(--text-sub); margin: 0;">
+        Memverifikasi otorisasi kepemilikan transaksi dan status konfirmasi dana.
+      </p>
+    </div>
+
+    <!-- Printable Official Receipt Document -->
+    <section id="receiptDocumentCard" class="card receipt-sheet" style="display: none; border-top: 5px solid var(--crimson-800); padding: 32px;">
+      <div id="receiptDocumentContent"></div>
+    </section>
+
+    <!-- Secure Guest / Manual Lookup Box (Hidden on Print) -->
+    <section id="receiptLookupCard" class="card no-print" style="margin-top: 24px;">
+      <div style="font-size: 11px; font-weight: 700; color: var(--crimson-700); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
+        Akses Kuitansi Aman (Zero Query-String Token)
+      </div>
+      <h3 style="font-family: var(--font-display); font-size: 17px; color: var(--text-main); margin-bottom: 8px;">
+        Cek Kuitansi dengan Kode Referensi &amp; Token Akses
+      </h3>
+      <p style="font-size: 12px; color: var(--text-sub); margin-bottom: 14px;">
+        Bagi donatur Tamu (<code>G000xxx</code>), masukkan Kode Referensi dan Token Akses 256-bit Anda. Token dikirim melalui body POST terenkripsi dan tidak pernah ditaruh pada parameter query URL.
+      </p>
+      <form id="receiptLookupForm" onsubmit="handleManualReceiptLookup(event)">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px;">
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Kode Referensi / ID Transaksi</label>
+            <input type="text" id="receiptInputRefOrTx" class="form-control" placeholder="Contoh: G000001 atau TX_..." required>
+          </div>
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Token Akses Tamu (Opsional jika Login Alumni)</label>
+            <input type="password" id="receiptInputAccessToken" class="form-control" placeholder="Tempel 64-hex access_token">
+          </div>
+        </div>
+        <button type="submit" id="btnLookupReceipt" class="btn btn-primary" style="font-size: 12px; padding: 8px 16px;">
+          Verifikasi &amp; Tampilkan Kuitansi
+        </button>
+      </form>
+    </section>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/receipt.js"></script>
+</body>
+</html>

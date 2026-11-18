@@ -9,13 +9,21 @@
  * @param {Object} data - {to_email, full_name, ref_code, amount, bank, date, program}
  */
 function sendDonorDonationReceivedEmail_(data) {
-  if (!data.to_email) return;
+  if (!data || !data.to_email) {
+    return { sent: false, error: "Missing recipient email." };
+  }
 
   try {
     const orgName =
       getConfig_("ORG_NAME") || "Pengelola Beasiswa Ikatan Alumni UPI";
     const formattedAmount = formatRupiah(data.amount);
     const subject = `[TERIMA KASIH] Donasi ${formattedAmount} Berhasil Diverifikasi (${orgName})`;
+    const receiptRowHtml = data.receipt_no
+      ? `<tr>
+           <td style="padding: 6px 0; color: #64748B;">No. Kuitansi Resmi:</td>
+           <td style="padding: 6px 0; font-weight: bold; color: #8B0000; font-family: monospace;">${escapeHtml_(data.receipt_no)}</td>
+         </tr>`
+      : "";
 
     const htmlBody = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1E293B; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden;">
@@ -28,11 +36,12 @@ function sendDonorDonationReceivedEmail_(data) {
             Halo <strong>${escapeHtml_(data.full_name || "Alumni UPI")}</strong>,
           </p>
           <p style="font-size: 14px; line-height: 1.6;">
-            Alhamdulillah, dana donasi Anda telah kami terima dan diverifikasi secara otomatis melalui mutasi bank. Terima kasih banyak atas kontribusi Anda bagi masa depan pendidikan adik-adik mahasiswa UPI!
+            Alhamdulillah, dana donasi Anda telah kami terima dan diverifikasi secara otomatis melalui sistem. Terima kasih banyak atas kontribusi Anda bagi masa depan pendidikan adik-adik mahasiswa UPI!
           </p>
 
           <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 18px; margin: 20px 0;">
             <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              ${receiptRowHtml}
               <tr>
                 <td style="padding: 6px 0; color: #64748B;">ID Donatur:</td>
                 <td style="padding: 6px 0; font-weight: bold; color: #1E293B;">${escapeHtml_(data.ref_code)}</td>
@@ -68,8 +77,11 @@ function sendDonorDonationReceivedEmail_(data) {
       subject: subject,
       htmlBody: htmlBody,
     });
+    return { sent: true, error: "" };
   } catch (err) {
-    Logger.log("Could not send donor email: " + err.message);
+    const errMsg = String((err && err.message) || err || "MailApp error");
+    Logger.log("Could not send donor email: " + errMsg);
+    return { sent: false, error: errMsg };
   }
 }
 
@@ -80,11 +92,10 @@ function sendDonorDonationReceivedEmail_(data) {
  */
 function sendAdminDonationAlert_(alerts) {
   try {
-    const adminEmailsRaw = getConfig_("ADMIN_EMAILS") || "maulanaa1408@upi.edu";
-    const emailList = adminEmailsRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    // Use the exact same authoritative admin allowlist source as Auth.gs
+    const emailList = typeof getAuthorizedAdminEmails_ === "function"
+      ? getAuthorizedAdminEmails_()
+      : [];
     if (emailList.length === 0) return;
 
     const orgName =
@@ -153,11 +164,10 @@ function sendAdminDonationAlert_(alerts) {
  */
 function sendAdminNewVerificationAlert_(user, verifId, data) {
   try {
-    const adminEmailsRaw = getConfig_("ADMIN_EMAILS") || "maulanaa1408@upi.edu";
-    const emailList = adminEmailsRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    // Use the exact same authoritative admin allowlist source as Auth.gs
+    const emailList = typeof getAuthorizedAdminEmails_ === "function"
+      ? getAuthorizedAdminEmails_()
+      : [];
     if (emailList.length === 0) return;
 
     const htmlBody = `
@@ -220,29 +230,94 @@ function sendAlumniVerifiedEmail_(email, name, refCode) {
 }
 
 /**
- * Sends rejection notification email to user.
+ * Sends revision request notification email to user (NEEDS_REVISION state).
  */
-function sendAlumniRejectedEmail_(email, name, reason) {
+function sendAlumniRevisionEmail_(email, name, reason) {
   try {
     const htmlBody = `
       <div style="font-family: sans-serif; max-width: 500px; color: #1E293B;">
-        <h3 style="color: #DC2626;">Pemberitahuan Status Verifikasi Alumni</h3>
+        <h3 style="color: #D97706;">Permintaan Revisi Berkas Verifikasi Alumni</h3>
         <p>Halo ${escapeHtml_(name)},</p>
-        <p>Mohon maaf, pengajuan verifikasi alumni Anda belum dapat kami setujui karena:</p>
-        <blockquote style="background-color: #F8FAFC; border-left: 4px solid #DC2626; padding: 10px; margin: 12px 0;">
-          ${escapeHtml_(reason || "Dokumen bukti tidak sesuai dengan catatan alumni UPI.")}
+        <p>Pengajuan verifikasi alumni Anda memerlukan perbaikan dokumen sebelum dapat disetujui:</p>
+        <blockquote style="background-color: #FFFBEB; border-left: 4px solid #D97706; padding: 10px; margin: 12px 0;">
+          ${escapeHtml_(reason || "Mohon unggah ulang dokumen kelulusan yang jelas dan terbaca.")}
         </blockquote>
-        <p>Anda dapat mengunggah kembali dokumen bukti yang valid (Ijazah / SKL / Kartu Alumni) melalui aplikasi.</p>
+        <p>Silakan masuk kembali ke Dasbor Alumni Anda untuk mengunggah perbaikan dokumen bukti kelulusan (PDF/JPG/PNG maksimal 5MB).</p>
       </div>
     `;
 
     MailApp.sendEmail({
       to: email,
-      subject: "[VERIFIKASI DITOLAK] Perlu Perbaikan Bukti Alumni UPI",
+      subject: "[PERLU REVISI] Perbaiki Bukti Verifikasi Alumni UPI",
+      htmlBody: htmlBody,
+    });
+  } catch (e) {
+    Logger.log("Alumni revision email error: " + e.message);
+  }
+}
+
+/**
+ * Sends final rejection notification email to user (OPEN-01: REJECTED is final).
+ */
+function sendAlumniRejectedEmail_(email, name, reason) {
+  try {
+    const htmlBody = `
+      <div style="font-family: sans-serif; max-width: 500px; color: #1E293B;">
+        <h3 style="color: #DC2626;">Pemberitahuan Status Verifikasi Alumni (Ditolak)</h3>
+        <p>Halo ${escapeHtml_(name)},</p>
+        <p>Mohon maaf, pengajuan verifikasi alumni Anda telah ditolak secara final karena:</p>
+        <blockquote style="background-color: #F8FAFC; border-left: 4px solid #DC2626; padding: 10px; margin: 12px 0;">
+          ${escapeHtml_(reason || "Dokumen bukti tidak sesuai dengan catatan kelulusan alumni UPI.")}
+        </blockquote>
+        <p>Sesuai kebijakan sistem, status REJECTED bersifat final dan pengajuan ulang melalui aplikasi tidak tersedia. Anda tetap dapat menyalurkan donasi melalui jalur Tamu di halaman beranda.</p>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: email,
+      subject: "[VERIFIKASI DITOLAK] Keputusan Final Verifikasi Alumni UPI",
       htmlBody: htmlBody,
     });
   } catch (e) {
     Logger.log("Alumni rejected email error: " + e.message);
+  }
+}
+
+/**
+ * Sends a tokenized status/receipt access link (#fragment only) for Guest recovery (OPEN-04).
+ * Never logs raw tokens to Logger or audit_log.
+ */
+function sendGuestAccessRecoveryEmail_(email, name, refCode, fragmentUrl) {
+  try {
+    const orgName =
+      getConfig_("ORG_NAME") || "Pengelola Beasiswa Ikatan Alumni UPI";
+    const htmlBody = `
+      <div style="font-family: sans-serif; max-width: 520px; color: #1E293B;">
+        <h3 style="color: #8B0000;">Pemulihan Akses Donasi Tamu</h3>
+        <p>Halo <strong>${escapeHtml_(name || "Donatur")}</strong>,</p>
+        <p>Berikut adalah tautan akses baru yang diterbitkan untuk memantau status donasi Anda dengan kode referensi <strong>${escapeHtml_(refCode)}</strong>:</p>
+        <div style="margin: 18px 0;">
+          <a href="${escapeHtml_(fragmentUrl)}" style="background-color: #8B0000; color: #FFFFFF; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: bold;">
+            Buka Status Donasi Saya
+          </a>
+        </div>
+        <p style="font-size: 12px; color: #64748B;">
+          Token akses sebelumnya telah otomatis dinonaktifkan demi keamanan. Jangan bagikan tautan ini kepada pihak lain.
+        </p>
+        <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 16px 0;" />
+        <p style="font-size: 11px; color: #94A3B8;">${escapeHtml_(orgName)}</p>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: email,
+      subject: `[PEMULIHAN AKSES] Kode Donasi ${refCode} - ${orgName}`,
+      htmlBody: htmlBody,
+    });
+    return { sent: true, error: "" };
+  } catch (e) {
+    Logger.log("Guest recovery email error: " + e.message);
+    return { sent: false, error: e.message || String(e) };
   }
 }
 

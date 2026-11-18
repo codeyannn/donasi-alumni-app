@@ -1,150 +1,127 @@
-# 🎓 DonasiAlumniApp — Sistem Donasi Beasiswa Khusus Alumni UPI
+# DonasiAlumniApp — Sistem Manajemen Donasi Beasiswa Hybrid Ikatan Alumni UPI
 
-> Aplikasi web donasi beasiswa terintegrasi dengan verifikasi identitas alumni UPI, penerbitan kode unik alumni (`A000471`) & tamu (`G000012`), integrasi webhook mutasi multi-bank (BSI, Mandiri, BCA, BNI, BRI) secara real-time, notifikasi email otomatis ke donatur & admin, serta kepatuhan penuh terhadap **UU No. 27/2022 (Pelindungan Data Pribadi)**.
+> Aplikasi web donasi beasiswa terpadu dengan verifikasi identitas alumni UPI 5-tingkat (`A000xxx`), donasi Guest tanpa akun (`G000xxx` + `access_token` 256-bit), integrasi pembayaran **Hybrid** (**Midtrans Snap** + **Transfer Bank Manual 3-Tier**), penerbitan kuitansi resmi (`KWT-YYYY-000001`), notifikasi email otomatis, serta kepatuhan **UU No. 27/2022 (Pelindungan Data Pribadi)**.
 
 ---
 
 ## 1. Alur & Fitur Utama
 
-1. **Pilihan Peran Saat Masuk:**
-   - **Saya Alumni UPI:** Mengisi formulir NIM, Tahun Lulus, Fakultas, dan mengunggah dokumen kelulusan (Ijazah / SKL / Kartu Alumni). Menunggu verifikasi admin.
-   - **Bukan Alumni / Tamu Umum:** Langsung mendapatkan kode donatur tamu (contoh: `G000012`) dan dapat langsung menyalurkan donasi.
-2. **Persetujuan Privasi Eksplisit (UU PDP No. 27/2022):**
-   - Pengguna menyetujui pemrosesan data pribadi sebelum mendaftar.
-   - Nama donatur di dasbor publik disensor secara otomatis (contoh: `Ahmad Rizki` ➔ `A***d R.` atau `Seseorang`).
-   - Nomor rekening donatur dipotong (`71****56`) dan narasi mentah perbankan disimpan hanya di database privat pengelola.
-   - **Minimisasi Data:** File bukti ijazah otomatis dihapus dari Google Drive setelah disetujui atau ditolak admin.
-3. **Penerbitan ID Unik Alumni:**
-   - Saat disetujui admin, alumni diterbitkan ID unik berurutan menggunakan `LockService` (contoh: `A000471`).
-   - ID ini dikirimkan via email resmi kelulusan verifikasi alumni.
-4. **Niat Donasi & Instruksi Transfer:**
-   - Donatur memilih nominal dan bank tujuan (BSI, Mandiri, BCA, BNI, BRI).
-   - Sistem menerbitkan instruksi transfer dan meminta donatur menuliskan ID referensi di berita m-banking.
-5. **Mesin Pencocokan Mutasi 3-Tier (`Logic.gs`):**
-   - **Tier 1 (Akurasi 100%):** Berita transfer memuat kode referensi (`A000471` / `G000012`). Otomatis diverifikasi dan niat donasi ditutup.
-   - **Tier 2 (Fallback Unik):** Jika tidak ada kode, sistem mencari niat donasi yang memiliki Bank + Nominal sama persis dalam jendela 24 jam. Jika hanya ada 1 intent yang cocok, otomatis diverifikasi.
-   - **Tier 3 (Review Queue):** Jika ambigu (terjadi collision nominal yang sama oleh 2 orang berbeda) atau tidak ada niat yang cocok, transaksi dicatat sebagai `UNMATCHED` dan masuk ke antrean review admin.
-6. **Notifikasi Real-Time Tanpa Akun E-Banking Bendahara:**
-   - **Email ke Donatur:** Bukti penerimaan sah donasi langsung masuk ke email donatur.
-   - **Email ke Admin:** Notifikasi real-time dana masuk dan status matching ke `maulanaa1408@upi.edu`.
-7. **Portal Admin:**
-   - Tab Verifikasi Alumni (Approve / Reject).
-   - Tab Review Queue (menautkan mutasi yang belum teridentifikasi ke donatur secara manual).
-   - Tab Insight (total penghimpunan, rasio akurasi Tier 1-3, dan distribusi per bank).
+1. **Alumni UPI (`app.html`):**
+   - Login menggunakan **Google Sign-In** (validasi `aud` & `email_verified` *fail-closed* di `Auth.gs`; manipulasi `role: "ADMIN"` diblokir penuh oleh backend).
+   - Verifikasi kelulusan 5-status: `NOT_SUBMITTED` → `PENDING` → `APPROVED` / `NEEDS_REVISION` / `REJECTED` (`OPEN-01`: `REJECTED` bersifat final; revisi hanya lewat `NEEDS_REVISION`).
+   - Formulir donasi alumni terkunci di UI dan backend sampai status `APPROVED` dan diterbitkan kode unik alumni `A000xxx`.
+   - Berkas bukti kelulusan disimpan di folder Google Drive privat (diakses admin via `admin_verif_proof`) dan otomatis dihapus (*auto-purge*) setelah `APPROVED` atau `REJECTED`.
+
+2. **Guest / Non-Alumni Tanpa Akun (`index.html` & `guest.js`):**
+   - Donasi langsung di beranda tanpa login Google dan **tanpa membuat record di sheet `users`**.
+   - Sistem menerbitkan kode referensi `G000xxx` + `access_token` acak 256-bit (disimpan ter-hash SHA-256 + `TOKEN_PEPPER`).
+   - Pemulihan akses menggunakan `sessionStorage` tab aktif, `idempotency_proof` saat retry koneksi putus, tautan URL `#fragment` email, serta rotasi token aman (`OPEN-04`).
+
+3. **Pembayaran Hybrid (`MIDTRANS_SNAP` & `MANUAL_TRANSFER`):**
+   - **Midtrans Snap (`Payments.gs` & `Webhook.gs`):** Dukungan Dual-Mode (**Webhook SHA-512** + **Active Status Inquiry** polling 5 detik dengan HTTP 404 hold) serta **Self-Healing Write-Ahead** + reversal in-place (`REFUNDED`, `PARTIAL_REFUNDED`, `CHARGEBACK`). Pada Mode Sandbox (`OPEN-03`), `gateway_fee = 0` dan `gross_amount = net_amount`.
+   - **Transfer Bank Manual 3-Tier (`Logic.gs` & `Webhook.gs`):** Mendukung VA 12-digit dan narasi mutasi 5 bank (BCA, Mandiri, BRI, BNI, BSI) lewat webhook HMAC-SHA256 + anti-replay timestamp/nonce di body JSON (`WEBHOOK_MANUAL_SECRET`), lengkap dengan anti-false-matching agar transfer dengan nominal berbeda tidak menutup intent `PENDING`.
+
+4. **Kuitansi Resmi (`receipt.html`, `Receipts.gs`) & Konsol Admin (`admin.html`, `Admin.gs`):**
+   - Nomor kuitansi `KWT-YYYY-000001` diterbitkan eksklusif untuk transaksi terkonfirmasi (`MATCHED` / `MANUAL_MATCHED`); transaksi `UNMATCHED` maupun `REFUNDED` dilarang memiliki kuitansi aktif.
+   - Status pengiriman email (`SENT` / `FAILED` / `PENDING` / `NOT_APPLICABLE`) dipisah dari status pembayaran, dilengkapi tombol idempoten `retry_tx_email`.
+   - Konsol Admin mendukung: Review Verifikasi Alumni + Pratinjau Bukti Drive, Antrean `UNMATCHED`, Monitoring Transaksi & Sinkronisasi Midtrans, CRUD Master Program (`Programs.gs`), Laporan Keuangan (`gross`/`fee`/`net`) + Ekspor CSV aman, serta Audit Log Admin terpaginasi dan teredaksi (`AuditLog.gs`).
+
+5. **Transparansi Publik Agregat Murni (`PublicApi.gs`):**
+   - Endpoint publik `GET ?action=public_summary` hanya mengembalikan total dana terhimpun, jumlah transaksi, nominal hari ini, dan agregat per program/bank (di-cache 60 detik), bebas dari daftar transaksi individu ataupun PII.
 
 ---
 
 ## 2. Struktur Direktori
 
-```
+```text
 Tugas/DonasiAlumniApp/
-├── apps-script/                 # Backend Google Apps Script
-│   ├── appsscript.json          # Manifest Web App
-│   ├── Setup.gs                 # Inisialisasi 9 tab Google Sheets & config
-│   ├── Logic.gs                 # Pure logic: ref code, masking, parsers, 3-tier matcher
-│   ├── Auth.gs                  # Google OAuth tokeninfo + CacheService + RBAC
-│   ├── Users.gs                 # Registrasi, pengajuan bukti, & review admin
-│   ├── Donations.gs             # Intent donasi, riwayat user, expiry trigger
-│   ├── Webhook.gs               # Listener mutasi bank, dedupe, matcher execution
-│   ├── Notifier.gs              # Dispatcher email donatur & admin
-│   ├── Admin.gs                 # Endpoint operasional admin & insight
-│   ├── PublicApi.gs             # Endpoint statistik publik (UU PDP compliant)
-│   ├── AuditLog.gs              # Jejak audit aktivitas penting
-│   └── Tests.gs                 # Self-test internal Apps Script
-├── frontend/                    # Web App Frontend (Deploy Netlify)
-│   ├── index.html               # Halaman pilih peran & dasbor publik
-│   ├── app.html                 # Dasbor personal donatur & instruksi transfer
-│   ├── admin.html               # Portal kontrol admin (verifikasi & review queue)
-│   ├── css/style.css            # Styling modern responsif
+├── apps-script/                    # Backend Google Apps Script V8 (15 file .gs + manifest)
+│   ├── appsscript.json             # Manifest Web App (Asia/Jakarta, V8)
+│   ├── Setup.gs                    # Skema V1/V2 (10 sheet), backup/restore, staging guard, & migrasi
+│   ├── Logic.gs                    # Pure domain logic: VA, 5-bank parser, 3-Tier, Midtrans mappers, masking
+│   ├── Auth.gs                     # Verifikasi Google OAuth, RBAC ADMIN_EMAILS, HMAC webhook, & token 256-bit
+│   ├── AuditLog.gs                 # Append-only audit log dengan redaksi rahasia & paginasi admin
+│   ├── Notifier.gs                 # Email konfirmasi donatur, kuitansi, revisi, & alert admin
+│   ├── Programs.gs                 # Master program CRUD + guard penghapusan histori
+│   ├── Payments.gs                 # Wrapper Midtrans Snap API, SHA-512, & alokator KWT-YYYY-XXXXXX
+│   ├── Receipts.gs                 # Akses kuitansi terverifikasi & proteksi anti-IDOR / reversal
+│   ├── Users.gs                    # Login alumni, unggah bukti privat, & approval atomik
+│   ├── Donations.gs                # Checkout Alumni/Guest, idempotency recovery, polling Active Inquiry
+│   ├── Webhook.gs                  # Webhook Bank Manual HMAC & Webhook Midtrans SHA-512 Self-Healing
+│   ├── Admin.gs                    # Portal admin, monitoring transaksi, sync Midtrans, & retry email
+│   ├── PublicApi.gs                # Agregat publik murni ter-cache 60 detik
+│   ├── Tests.gs                    # Self-test internal di runtime Apps Script V8
+│   └── Code.gs                     # Router HTTP doGet (publik) & doPost (text/plain JSON + webhooks)
+├── frontend/                       # Web App Frontend Statis (Deploy Netlify)
+│   ├── index.html                  # Beranda publik agregat, checkout Guest, & pelacak status
+│   ├── app.html                    # Dasbor Alumni terverifikasi & form upload verifikasi
+│   ├── admin.html                  # Portal Admin 6-tab (Verif, Queue, Transaksi/Midtrans, Program, Insight, Audit)
+│   ├── receipt.html                # Halaman cetak bukti kuitansi resmi (@media print)
+│   ├── css/style.css               # Styling institusional UPI + print media rules
 │   └── js/
-│       ├── config.js            # Konfigurasi URL API & Client ID
-│       ├── api.js               # HTTP client + Mock demo engine
-│       ├── auth.js              # Manajemen sesi Google Sign-In
-│       ├── app.js               # Logika halaman pengguna
-│       └── admin.js             # Logika halaman admin
-├── simulator/                   # Simulator Webhook Multi-Bank
-│   ├── payloads.py              # Generator narasi realistis 5 bank + ref_code
-│   └── send_webhook.py          # CLI pengirim payload (--ref, --duplicate, dll.)
-├── tests/
-│   └── logic.test.js            # 14 unit test Node.js (100% PASS)
-├── netlify.toml                 # Konfigurasi deploy Netlify
-├── requirements.txt             # Dependensi Python
+│       ├── config.js               # API_URL, GOOGLE_CLIENT_ID, MIDTRANS_CLIENT_KEY, DEMO_MODE
+│       ├── api.js                  # HTTP client POST text/plain (bebas CORS preflight & query token)
+│       ├── auth.js                 # Manajemen sesi Google Sign-In Alumni/Admin
+│       ├── guest.js                # Checkout & pelacakan Guest berbasis sessionStorage + #fragment
+│       ├── app.js                  # Controller Alumni, dynamic programs, Snap popup, & polling
+│       ├── admin.js                # Controller 6-tab Portal Admin & ekspor CSV aman
+│       └── receipt.js              # Controller receipt.html berbasis #fragment / sessionStorage
+├── simulator/                      # Simulator Webhook Multi-Bank
+│   ├── payloads.py                 # Generator narasi mutasi realistis 5 bank
+│   └── send_webhook.py             # CLI webhook pengirim payload HMAC-SHA256 JSON body
+├── tests/                          # Suite Uji Otomatis Node.js (67 Passed, 0 Failed)
+│   ├── logic.test.js               # 17 unit test logika murni
+│   ├── p0_security.test.js         # 9 test remediasi keamanan P0
+│   ├── p1_stabilization.test.js    # 5 test stabilisasi & anti-false-match P1
+│   ├── p2_migration.test.js        # 9 test backup, preflight, dry-run, staging guard, & inspeksi V2
+│   ├── p3_auth_verification.test.js# 5 test state machine verifikasi & Drive privat P3
+│   ├── p4_donation_management.test.js # 6 test Program CRUD, Guest checkout, & token recovery P4
+│   ├── p5_midtrans_hybrid.test.js  # 5 test Midtrans SHA-512, Active Inquiry, Self-Healing, & Refund P5
+│   ├── p6_receipt_notification.test.js # 4 test KWT receipt, anti-IDOR, & retry_tx_email P6
+│   ├── p7_admin_dashboard.test.js  # 3 test PublicApi agregat, Admin transaksi, & Audit Log P7
+│   └── p8_acceptance_20_scenarios.test.js # 4 grup terpadu mencakup TEST-01 s/d TEST-20
+├── netlify.toml
+├── requirements.txt
+├── PANDUAN_DEPLOY.md
+├── LAPORAN.md
 └── README.md
 ```
 
 ---
 
-## 3. Skema Database Google Sheets
+## 3. Skema Database Google Sheets V2 (10 Sheet)
 
-| Sheet                  | Kolom Utama                                                                                              | Fungsi                                                      |
-| ---------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `users`                | `user_id`, `email`, `full_name`, `role`, `ref_code`, `verification_status`, `consent_at`                 | Data pengguna terdaftar                                     |
-| `alumni_verifications` | `verif_id`, `user_id`, `nim`, `grad_year`, `faculty`, `proof_file_id`, `status`, `reject_reason`         | Dokumen pengajuan alumni                                    |
-| `donation_intents`     | `intent_id`, `user_id`, `ref_code`, `amount`, `bank`, `program`, `status`, `expires_at`                  | Niat transfer donasi aktif                                  |
-| `transactions`         | `tx_id`, `mutation_id`, `bank`, `amount`, `donor_display_name`, `match_status`, `match_tier`, `ref_code` | Mutasi dana masuk terkonfirmasi                             |
-| `review_queue`         | `queue_id`, `tx_id`, `bank`, `amount`, `description`, `reason`, `status`, `assigned_ref_code`            | Mutasi tier 3 untuk review manual admin                     |
-| `counters`             | `name`, `value`                                                                                          | Urutan penomoran `ALUMNI` & `GUEST` via LockService         |
-| `audit_log`            | `timestamp`, `actor_email`, `action`, `target`, `detail`                                                 | Audit trail kepatuhan data governance                       |
-| `config`               | `key`, `value`                                                                                           | `WEBHOOK_TOKEN`, `ADMIN_EMAILS`, `MATCH_WINDOW_HOURS`, dll. |
-| `program_keywords`     | `keyword`, `program`                                                                                     | Kamus tagging program donasi otomatis                       |
+| Sheet | Kolom | Fungsi |
+| :--- | :--- | :--- |
+| `users` | 9 kolom (`user_id` .. `created_at`) | Data akun Alumni & Admin (tanpa akun Guest) |
+| `alumni_verifications` | 13 kolom (`verif_id` .. `reject_reason`) | Tiket verifikasi ijazah alumni 5-tingkat |
+| `donation_intents` | 21 kolom (10 V1 + 11 V2 Midtrans & Guest token hash) | Niat donasi Alumni/Guest beserta `midtrans_order_id` & `last_inquiry_at` |
+| `transactions` | 35 kolom (17 V1 + 18 V2 Gateway, Receipt, & Email state) | Rekam mutasi manual & transaksi Midtrans (`gross`/`fee`/`net`, `receipt_no`, `email_status`) |
+| `review_queue` | 13 kolom | Antrean manual untuk mutasi Tier 3 (`UNMATCHED`) |
+| `counters` | `name`, `value` | Sequence atomik `ALUMNI`, `GUEST`, `RECEIPT`, `PROGRAM` via `LockService` |
+| `audit_log` | `timestamp`, `actor_email`, `action`, `target`, `detail` | Log audit append-only dengan redaksi token/secret otomatis |
+| `config` | `key`, `value`, `description` | Konfigurasi non-rahasia operasional (rahasia sensitif dipindah ke `ScriptProperties`) |
+| `program_keywords` | `keyword`, `program` | Kamus deteksi program fallback |
+| `programs` | `program_id`, `name`, `description`, `is_active`, `created_at`, `updated_at` | Master program donasi terkelola Admin (`PRG-001`..`PRG-005`) |
 
 ---
 
-## 4. Panduan Menjalankan & Menguji
+## 4. Menjalankan Pengujian Lokal
 
-### A. Uji Coba Cepat Frontend (Mode Demo)
-
-Buka terminal dan jalankan server lokal sederhana:
+Jalankan seluruh suite test regresi dan penerimaan P0–P8 dengan Node.js:
 
 ```powershell
-cd "Tugas/DonasiAlumniApp/frontend"
-python -m http.server 8000
-```
-
-Buka browser di `http://localhost:8000`:
-
-- Pilih **Saya Alumni UPI** ➔ klik tombol **Demo Mode**.
-- Anda akan diarahkan ke Dasbor, isi form verifikasi (NIM, Tahun Lulus, Fakultas, file ijazah contoh).
-- Di menu atas klik **⚙️ Admin Panel** untuk menyetujui verifikasi. Diterbitkan kode ID unik seperti `A000471`.
-- Kembali ke dasbor donasi dan buat instruksi donasi dengan nominal dan bank pilihan!
-
-### B. Menjalankan Uji Logika (Node.js)
-
-```powershell
-cd "Tugas/DonasiAlumniApp"
+cd "c:\Maulana\College\CODING\Semester 5\DATA_MANAGEMENT\Tugas\DonasiAlumniApp"
 node tests/logic.test.js
+node tests/p0_security.test.js
+node tests/p1_stabilization.test.js
+node tests/p2_migration.test.js
+node tests/p3_auth_verification.test.js
+node tests/p4_donation_management.test.js
+node tests/p5_midtrans_hybrid.test.js
+node tests/p6_receipt_notification.test.js
+node tests/p7_admin_dashboard.test.js
+node tests/p8_acceptance_20_scenarios.test.js
 ```
 
-- Seluruh 14 test suite berjalan otomatis (parser BCA, BSI, Mandiri, BNI, BRI, masking nama, dan 3-tier matcher).
-
-### C. Menjalankan Simulator Webhook Mutasi
-
-```powershell
-cd "Tugas/DonasiAlumniApp"
-
-# Uji kirim mutasi BCA dengan menyertakan kode alumni A000471 (Tier 1 Match)
-python simulator/send_webhook.py --ref A000471 --bank BCA --amount 500000 --dry-run
-```
-
----
-
-## 5. Langkah Deploy ke Google Apps Script
-
-1. Buat Google Sheets baru di [sheets.new](https://sheets.new) (beri nama misalnya `Donasi_Alumni_UPI_App`).
-2. Masuk ke **Extensions** ➔ **Apps Script**.
-3. Buat file `.gs` sesuai isi berkas di folder `apps-script/`:
-   - `Setup.gs`
-   - `Logic.gs`
-   - `Auth.gs`
-   - `Users.gs`
-   - `Donations.gs`
-   - `Webhook.gs`
-   - `Notifier.gs`
-   - `Admin.gs`
-   - `PublicApi.gs`
-   - `AuditLog.gs`
-   - `Tests.gs`
-4. Pilih fungsi `setupSheets` di toolbar atas dan klik **Run (Jalankan)** untuk membuat 9 tab sheet dan konfigurasi awal.
-5. Jalankan `runSelfTests` untuk memverifikasi logika internal berjalan 100% lulus.
-6. Klik **Deploy** ➔ **New deployment** ➔ Jenis: **Web app** ➔ Execute as: **Me** ➔ Access: **Anyone**.
-7. Salin URL Web App yang dihasilkan ke file `frontend/js/config.js` (atau simpan di localStorage `DONASI_API_URL`).
+Untuk panduan instalasi, konfigurasi `ScriptProperties`, migrasi V2 aman, hingga pengujian live di Google Apps Script & Netlify, lihat [PANDUAN_DEPLOY.md](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/PANDUAN_DEPLOY.md).

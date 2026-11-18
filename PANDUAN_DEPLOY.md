@@ -1,186 +1,110 @@
-# 🚀 Panduan Lengkap Deploy DonasiAlumniApp (Google Sheets + Apps Script + Google OAuth + Netlify)
+# Panduan Deploy & QA Live — DonasiAlumniApp (Google Sheets V2 + Apps Script + Netlify + Midtrans Sandbox)
 
-Panduan langkah demi langkah untuk men-deploy sistem secara penuh agar bisa diakses online dengan Google Sign-In aktif.
-
----
-
-## Ringkasan Alur Deploy
-
-```
-[1. Buat Google Sheets] ──> [2. Pasang Apps Script & Run setupSheets] ──> [3. Deploy Web App (Dapat API URL)]
-                                                                                  │
-[4. Setup Google Cloud Console (OAuth Client ID)] <───────────────────────────────┘
-  • Masukkan URI Netlify & localhost
-  • Dapatkan Client ID
-                                                                                  │
-[5. Update config.js Frontend] <──────────────────────────────────────────────────┘
-  • API_URL: URL Apps Script
-  • GOOGLE_CLIENT_ID: Client ID dari Google Cloud
-                                                                                  │
-[6. Deploy ke Netlify (Drop Folder / CLI / Git)] ──> [7. Aplikasi Live & Berfungsi Penuh!]
-```
+Panduan ini mencakup pemasangan backend Google Apps Script terbaru (`P0–P7`), pengaturan `ScriptProperties`, migrasi V1 → V2 non-destruktif, deploy Web App GAS & Netlify, serta checklist QA Live.
 
 ---
 
-## Langkah 1: Buat Google Spreadsheet Baru
+## 1. Pilihan Inisialisasi Database (Baru vs Sudah Berisi Data)
 
-1. Buka browser dan kunjungi [sheets.new](https://sheets.new).
-2. Beri nama spreadsheet di pojok kiri atas, misalnya: `DB_Beasiswa_IKA_UPI`.
-3. Biarkan tab pertama kosong (nanti akan dibuat otomatis oleh script).
-
----
-
-## Langkah 2: Pasang Kode Backend di Google Apps Script
-
-1. Di Google Sheets tersebut, klik menu **Ekstensi (Extensions)** ➔ **Apps Script**.
-2. Beri nama proyek Apps Script, misalnya: `Backend_Donasi_Alumni`.
-3. Di panel sebelah kiri terdapat daftar file. Ganti isi `Code.gs` dan tambahkan file-file script lainnya. Kamu bisa membuat file baru dengan klik tombol **`+`** (di sebelah Files) ➔ pilih **Script**.
-4. Salin kode dari folder lokal `Tugas/DonasiAlumniApp/apps-script/`:
-
-   | Nama File di Apps Script | Sumber File Lokal                                                                                                                           |
-   | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-   | `Code.gs`                | [`apps-script/Code.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Code.gs)           |
-   | `Setup.gs`               | [`apps-script/Setup.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Setup.gs)         |
-   | `Logic.gs`               | [`apps-script/Logic.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Logic.gs)         |
-   | `Auth.gs`                | [`apps-script/Auth.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Auth.gs)           |
-   | `Users.gs`               | [`apps-script/Users.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Users.gs)         |
-   | `Donations.gs`           | [`apps-script/Donations.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Donations.gs) |
-   | `Webhook.gs`             | [`apps-script/Webhook.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Webhook.gs)     |
-   | `Notifier.gs`            | [`apps-script/Notifier.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Notifier.gs)   |
-   | `Admin.gs`               | [`apps-script/Admin.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Admin.gs)         |
-   | `PublicApi.gs`           | [`apps-script/PublicApi.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/PublicApi.gs) |
-   | `AuditLog.gs`            | [`apps-script/AuditLog.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/AuditLog.gs)   |
-   | `Tests.gs`               | [`apps-script/Tests.gs`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/apps-script/Tests.gs)         |
-
-5. Tekan **Ctrl + S** (Simpan Semua).
-6. Di toolbar atas, pilih fungsi **`setupSheets`**, lalu klik tombol **Run (Jalankan)**:
-   - Klik **Review permissions** ➔ Pilih akun Google kamu ➔ Klik **Advanced** ➔ Klik **Go to Backend_Donasi_Alumni (unsafe)** ➔ Klik **Allow**.
-   - Tunggu sampai muncul log `Setup completed successfully`.
-7. Kembali ke tab browser Google Sheets kamu. Sekarang sudah otomatis terbentuk **9 tab sheet**: `users`, `alumni_verifications`, `donation_intents`, `transactions`, `review_queue`, `counters`, `audit_log`, `config`, dan `program_keywords`.
+- **Database Baru (Masih Kosong):** Jalankan `setupSheets()` satu kali untuk membuat struktur dasar, lalu jalankan `migrateDatabaseNonDestructive({ dryRun: false, autoBackup: false })` atau alur staging guard agar lengkap menjadi **10 tab V2** (`programs`, 21 kolom `donation_intents`, 35 kolom `transactions`).
+- **Database Lama V1 yang Sudah Berisi Data (Staging / Production):**
+  - **DILARANG keras menjalankan `setupSheets()`** pada database yang sudah berisi data.
+  - Gunakan alur aman: `verifyStagingPropsPresence()` → `runStagingP2DryRun()` → `runStagingP2Migration()` → `inspectStagingPostMigrationDetails()`.
 
 ---
 
-## Langkah 3: Deploy Apps Script sebagai Web App
+## 2. Pasang Seluruh Kode Backend Google Apps Script (15 File `.gs` + Manifest)
 
-1. Di editor Apps Script, klik tombol biru **Deploy (Terapkan)** di pojok kanan atas ➔ **New deployment (Penerapan baru)**.
-2. Klik ikon gear di sebelah _"Select type"_ ➔ pilih **Web app (Aplikasi web)**.
-3. Konfigurasikan:
-   - **Description:** `v1 Production Live`
-   - **Execute as:** **Me (email Anda)**
-   - **Who has access:** **Anyone (Siapa saja)** _(Wajib "Anyone" agar frontend di Netlify dan webhook bank bisa memanggil API)_
-4. Klik **Deploy**.
-5. Salin **Web app URL** yang muncul (berakhiran `/exec`), contohnya:
-   ```
-   https://script.google.com/macros/s/AKfycbx.../exec
-   ```
-   _Simpan URL ini untuk Langkah 5._
+Buka Google Spreadsheet target → **Extensions > Apps Script**, lalu salin seluruh berkas dari folder lokal `apps-script/`:
 
----
+| File di Apps Script | Fungsi Utama |
+| :--- | :--- |
+| `appsscript.json` | Manifest Web App V8 (`Asia/Jakarta`, `ANYONE_ANONYMOUS`) |
+| `Setup.gs` | Skema V1/V2 10 sheet, backup/restore, staging guard, & validator pascamigrasi |
+| `Logic.gs` | Pure logic VA, parser 5 bank, matcher 3-Tier, masking `OPEN-02`, mapper Midtrans |
+| `Auth.gs` | Verifikasi Google ID Token, RBAC `ADMIN_EMAILS`, HMAC webhook, token Guest 256-bit |
+| `AuditLog.gs` | Audit log append-only dengan redaksi rahasia & paginasi |
+| `Notifier.gs` | Pengirim email donatur/admin/revisi dengan status `{ sent, error }` |
+| `Programs.gs` | CRUD master program donasi & guard penghapusan |
+| `Payments.gs` | Client Midtrans Snap REST API (`/snap/v1/transactions`, `/v2/{order_id}/status`), SHA-512, alokator `KWT-` |
+| `Receipts.gs` | API `get_receipt` anti-IDOR, blokir `UNMATCHED` & `REFUNDED`, notice Sandbox |
+| `Users.gs` | Registrasi Alumni, upload bukti ke Drive privat, preview & review admin |
+| `Donations.gs` | Checkout Alumni `APPROVED` & Guest non-akun, idempotency proof, polling Active Inquiry |
+| `Webhook.gs` | Webhook Bank Manual HMAC & Webhook Midtrans SHA-512 (Self-Healing Write-Ahead) |
+| `Admin.gs` | Manajemen antrean, `admin_transactions`, `admin_check_midtrans`, `retry_tx_email`, & insights |
+| `PublicApi.gs` | Endpoint `public_summary` agregat murni ter-cache 60 detik |
+| `Tests.gs` | Unit self-test internal runtime Apps Script (`runSelfTests`) |
+| `Code.gs` | HTTP Router `doGet` (hanya publik) & `doPost` (`text/plain` JSON + webhook) |
 
-## Langkah 4: Setup Google Cloud Console (Dapatkan Google Client ID)
-
-Untuk mengaktifkan tombol login resmi "Sign in with Google":
-
-1. Buka [Google Cloud Console](https://console.cloud.google.com/).
-2. Buat project baru (atau gunakan project yang sudah ada dari tugas SuratKu):
-   - Klik dropdown project di atas ➔ **New Project** ➔ Beri nama: `Donasi Alumni UPI` ➔ Klik **Create**.
-3. **Konfigurasi OAuth Consent Screen:**
-   - Masuk ke menu sidebar ➔ **APIs & Services** ➔ **OAuth consent screen**.
-   - Pilih User Type: **External** ➔ Klik **Create**.
-   - Isi formulir:
-     - **App name:** `Beasiswa IKA UPI`
-     - **User support email:** email kamu (`maulanaa1408@upi.edu`)
-     - **Developer contact information:** email kamu
-   - Klik **Save and Continue** sampai selesai (tidak perlu tambah scope khusus).
-   - Di tab **Test users**, tambahkan email kamu dan email uji coba lainnya.
-4. **Buat OAuth Client ID:**
-   - Masuk ke menu **APIs & Services** ➔ **Credentials**.
-   - Klik **+ Create Credentials** di bagian atas ➔ Pilih **OAuth client ID**.
-   - **Application type:** Pilih **Web application**.
-   - **Name:** `Donasi Alumni Web`
-   - Di bagian **Authorized JavaScript origins**, tambahkan:
-     - `http://localhost:8000` (untuk tes lokal)
-     - `http://localhost:8501`
-     - _(Nanti setelah deploy Netlify, tambahkan URL Netlify-mu di sini, misal: `https://donasi-alumni-upi.netlify.app`)_
-   - Klik **Create**.
-5. Salin string **Client ID** yang berakhiran `.apps.googleusercontent.com`.
+Tekan **`Ctrl + S`** setelah menyalin semua file.
 
 ---
 
-## Langkah 5: Masukkan Konfigurasi ke Frontend
+## 3. Atur `ScriptProperties` (Wajib Fail-Closed)
 
-Buka file [`frontend/js/config.js`](file:///c:/Maulana/College/CODING/Semester%205/DATA_MANAGEMENT/Tugas/DonasiAlumniApp/frontend/js/config.js) di VS Code / editor kamu:
+Di editor Apps Script, buka **⚙️ Project Settings > Script Properties** dan isi properti berikut (rahasia **tidak pernah** disimpan di sel sheet `config`):
+
+| Key | Wajib | Keterangan Nilai |
+| :--- | :--- | :--- |
+| `GOOGLE_CLIENT_ID` | Ya | OAuth Web Client ID dari Google Cloud Console (`...apps.googleusercontent.com`) |
+| `ADMIN_EMAILS` | Ya | Daftar email admin dipisah koma (mis. `maulanaa1408@upi.edu`) |
+| `WEBHOOK_MANUAL_SECRET` | Ya | Secret acak panjang (>= 32 karakter) untuk HMAC webhook simulator manual |
+| `TOKEN_PEPPER` | Ya | Pepper acak panjang (>= 32 karakter) untuk hashing `access_token` Guest |
+| `ALLOW_MOCK_AUTH` | Ya | Isi **`false`** di environment live / staging |
+| `EXPECTED_STAGING_SPREADSHEET_ID` | Staging | Wajib sama persis dengan Spreadsheet ID salinan `STAGING_...` saat migrasi |
+| `MIDTRANS_SERVER_KEY` | Saat aktifkan Midtrans | Server Key Sandbox (`SB-Mid-server-...`) dari Midtrans Dashboard (`OPEN-05`) |
+| `MIDTRANS_IS_PRODUCTION` | Opsional | **`false`** untuk Sandbox *(default)* |
+
+---
+
+## 4. Deploy Apps Script sebagai Web App
+
+1. Klik **Deploy > New deployment** (atau **Manage deployments > Edit > New version** pada deployment yang sudah ada agar URL `/exec` tetap sama).
+2. Pilih type **Web app**:
+   - **Execute as:** `Me`
+   - **Who has access:** `Anyone`
+3. Klik **Deploy** dan salin URL Web App berakhiran `/exec`.
+4. Jalankan fungsi `runSelfTests` satu kali di editor untuk memastikan self-test runtime Google V8 lulus.
+
+---
+
+## 5. Konfigurasi Frontend (`frontend/js/config.js`) & Google Cloud Console
+
+1. Di Google Cloud Console (**APIs & Services > Credentials > OAuth Client ID Web Application**):
+   - Tambahkan origin domain live Netlify dan origin dev lokal di **Authorized JavaScript origins** (tanpa trailing slash `/`), misalnya:
+     - `https://<domain-netlify-anda>.netlify.app`
+     - `http://localhost:8000`
+2. Perbarui `frontend/js/config.js`:
 
 ```javascript
 const CONFIG = {
-  // Masukkan URL Web App hasil Langkah 3
-  API_URL:
-    window.localStorage.getItem("DONASI_API_URL") ||
-    "https://script.google.com/macros/s/AKfycbx.../exec",
-
-  // Masukkan Google Client ID hasil Langkah 4
-  GOOGLE_CLIENT_ID:
-    window.localStorage.getItem("DONASI_GOOGLE_CLIENT_ID") ||
-    "YOUR_CLIENT_ID.apps.googleusercontent.com",
-
-  // Otomatis false jika API_URL sudah diisi
+  API_URL: window.localStorage.getItem("DONASI_API_URL") || "https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec",
+  GOOGLE_CLIENT_ID: window.localStorage.getItem("DONASI_GOOGLE_CLIENT_ID") || "<CLIENT_ID>.apps.googleusercontent.com",
+  MIDTRANS_CLIENT_KEY: window.localStorage.getItem("DONASI_MIDTRANS_CLIENT_KEY") || "",
+  MIDTRANS_SNAP_URL: "https://app.sandbox.midtrans.com/snap/snap.js",
+  ENVIRONMENT: "staging",
   DEMO_MODE: false,
 };
 ```
 
-Simpan file (`Ctrl + S`).
+*(Selama `MIDTRANS_CLIENT_KEY` & `MIDTRANS_SERVER_KEY` Sandbox belum diisi, jalur Transfer Bank Manual 3-Tier berjalan penuh sedangkan kanal `MIDTRANS_SNAP` berada pada mode prepared aman).*
 
----
-
-## Langkah 6: Deploy ke Netlify (Gratis & Cepat)
-
-Ada 2 cara mudah deploy ke Netlify:
-
-### Cara A: Drag & Drop Folder (Paling Cepat / Tanpa Git)
-
-1. Buka [app.netlify.com](https://app.netlify.com/) dan login/daftar.
-2. Masuk ke tab **Sites** ➔ scroll ke bawah ke bagian _"Want to deploy a new site without connecting to Git?"_.
-3. Buka File Explorer di laptopmu, buka folder:
-   `c:\Maulana\College\CODING\Semester 5\DATA_MANAGEMENT\Tugas\DonasiAlumniApp\`
-4. Tarik (_drag & drop_) folder **`frontend`** langsung ke kotak drop di browser Netlify.
-5. Netlify akan langsung memproses deploy dalam 5 detik dan memberikan domain gratis, misalnya:
-   `https://beasiswa-alumni-upi.netlify.app`.
-
-### Cara B: Via Netlify CLI (Terminal)
-
-Jika kamu punya `netlify-cli`:
-
-```powershell
-cd "c:\Maulana\College\CODING\Semester 5\DATA_MANAGEMENT\Tugas\DonasiAlumniApp"
-netlify deploy --prod --dir=frontend
-```
-
----
-
-## Langkah 7: Finalisasi Otorisasi Google
-
-1. Salin domain Netlify yang baru kamu dapatkan (misal: `https://beasiswa-alumni-upi.netlify.app`).
-2. Buka kembali [Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials).
-3. Klik nama OAuth Client yang dibuat di Langkah 4 (`Donasi Alumni Web`).
-4. Di bagian **Authorized JavaScript origins**, klik **+ Add URI**, lalu tempelkan domain Netlify-mu:
-   ```
-   https://beasiswa-alumni-upi.netlify.app
-   ```
-   _(Penting: jangan sertakan tanda garis miring `/` di paling akhir)._
-5. Klik **Save**.
-
----
-
-## Selesai! Cara Mengetes Sistem yang Sudah Online:
-
-1. Buka link Netlify kamu di browser.
-2. Klik tombol **Saya Alumni UPI** ➔ Tombol **Sign in with Google** akan muncul dan berfungsi resmi!
-3. Login dengan akun Google-mu.
-4. Masuk ke halaman pengajuan verifikasi alumni, isi data dan upload ijazah contoh.
-5. Login ke tab Admin di `https://your-site.netlify.app/admin.html` (otomatis terbuka untuk email `maulanaa1408@upi.edu`).
-6. Setujui verifikasi ➔ Kode resmi **`A000001`** langsung terbit dan email notifikasi resmi masuk ke Gmail!
-7. Uji pengiriman webhook mutasi bank live menggunakan simulator:
+3. Deploy folder `frontend/` ke Netlify:
    ```powershell
-   python simulator/send_webhook.py --url "URL_WEB_APP_APPS_SCRIPT" --ref A000001 --bank BCA --amount 500000
+   netlify deploy --prod --dir=frontend
    ```
-   Mutasi akan langsung terverifikasi otomatis (Tier 1 Match) dan dana tercatat di Google Sheets secara real-time!
+
+---
+
+## 6. Checklist QA Live (Staging / Netlify → GAS `/exec`)
+
+1. **Verifikasi CORS & Transport (`TEST-20`):** Buka tab **Network** DevTools → muat beranda, lakukan checkout Guest, dan login Admin. Pastikan tidak ada request `OPTIONS` yang gagal, semua request `POST` memakai `Content-Type: text/plain;charset=utf-8`, dan tidak ada token di URL query string.
+2. **Alur Alumni & Drive Privat (`TEST-07`, `TEST-17`):** Daftar dengan akun Google non-admin → unggah ijazah → buka Portal Admin tab *Verifikasi Alumni* → klik *Lihat Bukti* (pastikan gambar/PDF tampil lewat `admin_verif_proof`) → *Setujui* → pastikan kode `A000001` terbit & dokumen Drive terhapus otomatis.
+3. **Alur Guest Tanpa Akun & Kuitansi (`TEST-05`, `TEST-04`):** Di `index.html`, kirim donasi Guest jalur `MANUAL_TRANSFER` → pastikan sheet `users` tidak bertambah → jalankan simulator webhook HMAC ke URL `/exec`:
+   ```powershell
+   python simulator/send_webhook.py --url "<WEB_APP_EXEC_URL>" --ref G000001 --bank BCA --amount 150000
+   ```
+   Lalu buka tautan `receipt.html#ref=G000001&token=<ACCESS_TOKEN>` dan uji **Cetak / Simpan PDF**.
+4. **Midtrans Sandbox Live (`TEST-06`, `TEST-08`..`TEST-13` — setelah `OPEN-05` diisi):**
+   - Atur Payment Notification URL di Midtrans Sandbox Dashboard ke `<WEB_APP_EXEC_URL>`.
+   - Lakukan checkout `MIDTRANS_SNAP`, bayar di *Midtrans Sandbox Payment Simulator*, dan verifikasi Active Status Inquiry / Webhook mencatat `MATCHED`, `gateway_fee = 0` (`Mode Sandbox`), serta menerbitkan kuitansi `KWT-...`.
