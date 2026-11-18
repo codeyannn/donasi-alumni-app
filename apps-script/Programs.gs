@@ -5,7 +5,8 @@
  */
 
 var ACTIVE_PROGRAMS_CACHE_KEY = 'active_programs_v1';
-var ACTIVE_PROGRAMS_CACHE_TTL_SEC = 60;
+// Cache active programs for 5 minutes; automatically invalidated on any admin program write
+var ACTIVE_PROGRAMS_CACHE_TTL_SEC = 300;
 
 /**
  * Checks whether the target v2 'programs' sheet exists and has valid headers.
@@ -159,6 +160,43 @@ function countProgramHistoricalUsage_(ss, programId, programName) {
 }
 
 /**
+ * Builds a usage count lookup map for all programs in a single pass over intents and transactions
+ * to avoid N repeated Spreadsheet getDataRange() RPC calls inside getAllProgramsAdmin.
+ */
+function buildProgramUsageMap_(ss, programRows, hMap) {
+  const usageByPid = {};
+  const pidByLowerName = {};
+
+  for (let i = 1; i < programRows.length; i++) {
+    const pid = String(programRows[i][hMap.program_id] || '').trim();
+    const name = String(programRows[i][hMap.name] || '').trim().toLowerCase();
+    if (!pid) continue;
+    usageByPid[pid] = 0;
+    if (name) pidByLowerName[name] = pid;
+  }
+
+  const accumulateSheet = function (sheetName) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    const sMap = getHeaderMap_(sheet);
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      const rowPid = sMap.program_id !== undefined ? String(rows[i][sMap.program_id] || '').trim() : '';
+      const rowName = sMap.program !== undefined ? String(rows[i][sMap.program] || '').trim().toLowerCase() : '';
+      if (rowPid && usageByPid[rowPid] !== undefined) {
+        usageByPid[rowPid]++;
+      } else if (rowName && pidByLowerName[rowName] && usageByPid[pidByLowerName[rowName]] !== undefined) {
+        usageByPid[pidByLowerName[rowName]]++;
+      }
+    }
+  };
+
+  accumulateSheet(SHEET_NAMES.INTENTS);
+  accumulateSheet(SHEET_NAMES.TRANSACTIONS);
+  return usageByPid;
+}
+
+/**
  * Lists all programs (active and inactive) with historical usage counters for Admin UI.
  *
  * @param {string} adminToken - Valid administrator Google ID token.
@@ -170,6 +208,8 @@ function getAllProgramsAdmin(adminToken) {
   const sheet = requireProgramsSheetReady_(ss);
   const hMap = getHeaderMap_(sheet);
   const rows = sheet.getDataRange().getValues();
+  // Compute usage counts across all programs in one pass instead of per-row full-sheet scans
+  const usageByPid = buildProgramUsageMap_(ss, rows, hMap);
   const items = [];
 
   for (let i = 1; i < rows.length; i++) {
@@ -181,7 +221,7 @@ function getAllProgramsAdmin(adminToken) {
       name: name,
       description: hMap.description !== undefined ? String(rows[i][hMap.description] || '').trim() : '',
       is_active: String(rows[i][hMap.is_active] || '').trim().toUpperCase() === 'TRUE',
-      usage_count: countProgramHistoricalUsage_(ss, pid, name),
+      usage_count: usageByPid[pid] || 0,
       created_at: hMap.created_at !== undefined ? rows[i][hMap.created_at] : '',
       updated_at: hMap.updated_at !== undefined ? rows[i][hMap.updated_at] : ''
     });

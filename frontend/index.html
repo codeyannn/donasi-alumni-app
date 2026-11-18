@@ -307,16 +307,36 @@
       });
     }
 
+    function renderPublicSummaryToDom(data) {
+      if (!data || data.status !== 'ok') return;
+      document.getElementById('pubTotalAmount').innerText = data.formatted_total || 'Rp 0';
+      document.getElementById('pubTotalCount').innerText = `${data.total_count || 0} Transaksi`;
+      document.getElementById('pubTodayAmount').innerText = data.formatted_today || 'Rp 0';
+
+      renderAggregateTable('pubProgramTable', data.by_program || {}, 'Belum ada agregat program.');
+      renderAggregateTable('pubBankTable', data.by_bank || {}, 'Belum ada agregat kanal.');
+    }
+
     async function loadPublicData() {
+      // Render cached summary immediately (0 ms) while revalidating from GAS in the background
+      try {
+        if (window.sessionStorage) {
+          const cached = window.sessionStorage.getItem('DONASI_PUBLIC_SUMMARY_CACHE');
+          if (cached) {
+            renderPublicSummaryToDom(JSON.parse(cached));
+          }
+        }
+      } catch (ignoreCacheErr) {}
+
       try {
         const data = await API.get('public_summary');
-        if (data.status === 'ok') {
-          document.getElementById('pubTotalAmount').innerText = data.formatted_total || 'Rp 0';
-          document.getElementById('pubTotalCount').innerText = `${data.total_count || 0} Transaksi`;
-          document.getElementById('pubTodayAmount').innerText = data.formatted_today || 'Rp 0';
-
-          renderAggregateTable('pubProgramTable', data.by_program || {}, 'Belum ada agregat program.');
-          renderAggregateTable('pubBankTable', data.by_bank || {}, 'Belum ada agregat kanal.');
+        if (data && data.status === 'ok') {
+          renderPublicSummaryToDom(data);
+          try {
+            if (window.sessionStorage) {
+              window.sessionStorage.setItem('DONASI_PUBLIC_SUMMARY_CACHE', JSON.stringify(data));
+            }
+          } catch (ignoreSaveErr) {}
         }
       } catch (e) {
         console.error('Error loading public data:', e);

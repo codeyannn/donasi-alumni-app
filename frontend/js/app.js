@@ -49,15 +49,46 @@ function updateDonationFormAccess() {
   }
 }
 
+function renderProgramOptions_(select, programs) {
+  if (!select || !Array.isArray(programs) || programs.length === 0) return;
+  select.innerHTML = programs
+    .map((p) => `<option value="${escapeApp(p.program_id)}">${escapeApp(p.name)}</option>`)
+    .join('');
+}
+
 async function loadActiveProgramsForDashboard() {
   const select = document.getElementById('programSelect');
   if (!select) return;
+
+  // Render cached active programs immediately from sessionStorage (Stale-While-Revalidate)
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const cachedRaw = window.sessionStorage.getItem('DONASI_ACTIVE_PROGRAMS_CACHE');
+      if (cachedRaw) {
+        const cachedObj = JSON.parse(cachedRaw);
+        if (cachedObj && Array.isArray(cachedObj.programs) && cachedObj.programs.length > 0) {
+          renderProgramOptions_(select, cachedObj.programs);
+          // Skip redundant network round-trip if cache is younger than 60 seconds
+          if (cachedObj.ts && Date.now() - cachedObj.ts < 60000) {
+            return;
+          }
+        }
+      }
+    }
+  } catch (ignoreCacheErr) {}
+
   try {
     const res = await API.get('active_programs');
     if (res && res.status === 'ok' && Array.isArray(res.programs) && res.programs.length > 0) {
-      select.innerHTML = res.programs
-        .map((p) => `<option value="${escapeApp(p.program_id)}">${escapeApp(p.name)}</option>`)
-        .join('');
+      renderProgramOptions_(select, res.programs);
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.setItem(
+            'DONASI_ACTIVE_PROGRAMS_CACHE',
+            JSON.stringify({ ts: Date.now(), programs: res.programs })
+          );
+        }
+      } catch (ignoreSaveErr) {}
     }
   } catch (err) {
     console.error('Failed loading active programs:', err);
@@ -80,8 +111,11 @@ async function initDashboard() {
 
   renderVerificationStatusBanner();
   updateDonationFormAccess();
-  await loadActiveProgramsForDashboard();
-  await loadMyDonationsData();
+  // Fetch active programs and personal donation history in parallel instead of sequentially
+  await Promise.all([
+    loadActiveProgramsForDashboard(),
+    loadMyDonationsData()
+  ]);
 }
 
 function setAmount(val) {

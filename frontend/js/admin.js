@@ -6,6 +6,39 @@
 var adminAuditLimit = 25;
 var adminAuditOffset = 0;
 var cachedAdminTransactions = [];
+// Track per-tab loaded state so hidden tabs are lazy-loaded on demand instead of blocking initial load
+var adminLoadedTabs = {
+  verif: false,
+  queue: false,
+  transactions: false,
+  programs: false,
+  insights: false,
+  audit: false,
+};
+
+/**
+ * Loads data for a specific admin tab only if it has not been loaded yet or forceRefresh is true.
+ */
+async function ensureAdminTabLoaded(tab, forceRefresh) {
+  if (!forceRefresh && adminLoadedTabs[tab]) {
+    return;
+  }
+  adminLoadedTabs[tab] = true;
+
+  if (tab === "verif") {
+    await loadAdminVerifications();
+  } else if (tab === "queue") {
+    await loadAdminQueue();
+  } else if (tab === "transactions") {
+    await loadAdminTransactions();
+  } else if (tab === "programs") {
+    await loadAdminPrograms();
+  } else if (tab === "insights") {
+    await loadAdminInsights();
+  } else if (tab === "audit") {
+    await loadAdminAuditLogs(adminAuditOffset);
+  }
+}
 
 async function initAdminPortal() {
   const user = getCurrentUser();
@@ -16,12 +49,8 @@ async function initAdminPortal() {
     return;
   }
 
-  await loadAdminVerifications();
-  await loadAdminQueue();
-  await loadAdminTransactions();
-  await loadAdminPrograms();
-  await loadAdminInsights();
-  await loadAdminAuditLogs(0);
+  // Only load the default visible tab ('verif') on entry to eliminate the 6-request sequential waterfall
+  await ensureAdminTabLoaded("verif", true);
 }
 
 function switchTab(tab) {
@@ -51,6 +80,9 @@ function switchTab(tab) {
     const btn = document.getElementById(btnId);
     if (btn) btn.className = tab === key ? "btn btn-primary" : "btn btn-secondary";
   });
+
+  // Lazy-load the selected tab on first visit (or if invalidated after an admin write action)
+  ensureAdminTabLoaded(tab, false);
 }
 
 function normalizeAdminVerifStatus(status) {
@@ -222,6 +254,9 @@ async function handleReview(verifId, decision) {
             ? "Permintaan revisi dikirimkan kepada alumni."
             : "Pengajuan alumni ditolak secara final (REJECTED).";
       alert(msg);
+      // Mark insights and audit tabs dirty so they refresh on next tab switch without blocking now
+      adminLoadedTabs.insights = false;
+      adminLoadedTabs.audit = false;
       await loadAdminVerifications();
     } else {
       alert("Gagal memproses: " + (res.message || "Error"));
@@ -301,6 +336,10 @@ async function handleResolveQueue(queueId) {
       alert(
         `Transaksi berhasil ditautkan ke ${targetCode}! Email tanda terima donasi otomatis terkirim ke donatur.`,
       );
+      // Mark dependent ledger, insights, and audit tabs dirty for lazy refresh
+      adminLoadedTabs.transactions = false;
+      adminLoadedTabs.insights = false;
+      adminLoadedTabs.audit = false;
       await loadAdminQueue();
     } else {
       alert("Gagal menautkan: " + (res.message || "Error"));
@@ -471,8 +510,10 @@ async function handleAdminSyncMidtrans(intentId) {
     });
     if (res.status === "ok") {
       alert(`Sinkronisasi selesai: Status Intent = ${res.intent_status}, Gateway = ${res.gateway_status}`);
+      // Mark insights and audit tabs dirty instead of chaining extra sequential requests
+      adminLoadedTabs.insights = false;
+      adminLoadedTabs.audit = false;
       await loadAdminTransactions();
-      await loadAdminInsights();
     } else {
       alert("Gagal sinkronisasi Midtrans: " + (res.message || "Error"));
     }
@@ -656,6 +697,14 @@ function resetProgramForm() {
   document.getElementById("btnSaveProgram").innerText = "Tambah Program";
 }
 
+function clearActiveProgramsSessionCache_() {
+  try {
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      window.sessionStorage.removeItem("DONASI_ACTIVE_PROGRAMS_CACHE");
+    }
+  } catch (ignoreStorageErr) {}
+}
+
 async function handleSaveProgram(e) {
   e.preventDefault();
   const editId = document.getElementById("programEditId").value.trim();
@@ -674,6 +723,8 @@ async function handleSaveProgram(e) {
     });
     if (res.status === "ok") {
       alert(editId ? "Program berhasil diperbarui." : `Program baru dibuat (${res.program.program_id}).`);
+      clearActiveProgramsSessionCache_();
+      adminLoadedTabs.audit = false;
       resetProgramForm();
       await loadAdminPrograms();
     } else {
@@ -693,6 +744,8 @@ async function handleToggleProgram(programId, nextActive) {
       is_active: nextActive,
     });
     if (res.status === "ok") {
+      clearActiveProgramsSessionCache_();
+      adminLoadedTabs.audit = false;
       await loadAdminPrograms();
     } else {
       alert("Gagal mengubah status program: " + (res.message || "Error"));
@@ -713,6 +766,8 @@ async function handleDeleteProgram(programId) {
     });
     if (res.status === "ok") {
       alert("Program berhasil dihapus.");
+      clearActiveProgramsSessionCache_();
+      adminLoadedTabs.audit = false;
       await loadAdminPrograms();
     } else {
       alert("Gagal menghapus program: " + (res.message || "Error"));

@@ -179,18 +179,49 @@ function handleGuestChannelChange() {
 }
 
 /**
- * Loads active donation programs dynamically from backend GET active_programs endpoint.
+ * Loads active donation programs dynamically from backend GET active_programs endpoint
+ * with instant sessionStorage Stale-While-Revalidate caching.
  */
 async function loadGuestActivePrograms() {
   const selectEl = document.getElementById('guestProgramSelect');
   if (!selectEl) return;
 
+  const applyProgramsToSelect = (programs) => {
+    if (!Array.isArray(programs) || programs.length === 0) return;
+    selectEl.innerHTML = programs
+      .map((p) => `<option value="${escapeGuestHtml(p.program_id)}">${escapeGuestHtml(p.name)}</option>`)
+      .join('');
+  };
+
+  // Render cached active programs immediately if available in sessionStorage
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const cachedRaw = window.sessionStorage.getItem('DONASI_ACTIVE_PROGRAMS_CACHE');
+      if (cachedRaw) {
+        const cachedObj = JSON.parse(cachedRaw);
+        if (cachedObj && Array.isArray(cachedObj.programs) && cachedObj.programs.length > 0) {
+          applyProgramsToSelect(cachedObj.programs);
+          // Avoid extra GAS round-trip when cache was populated less than 60 seconds ago
+          if (cachedObj.ts && Date.now() - cachedObj.ts < 60000) {
+            return;
+          }
+        }
+      }
+    }
+  } catch (ignoreCacheErr) {}
+
   try {
     const res = await API.get('active_programs');
     if (res && res.status === 'ok' && Array.isArray(res.programs) && res.programs.length > 0) {
-      selectEl.innerHTML = res.programs
-        .map((p) => `<option value="${escapeGuestHtml(p.program_id)}">${escapeGuestHtml(p.name)}</option>`)
-        .join('');
+      applyProgramsToSelect(res.programs);
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.setItem(
+            'DONASI_ACTIVE_PROGRAMS_CACHE',
+            JSON.stringify({ ts: Date.now(), programs: res.programs })
+          );
+        }
+      } catch (ignoreSaveErr) {}
     }
   } catch (err) {
     console.error('Failed loading active programs for guest form:', err);
