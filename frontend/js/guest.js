@@ -238,8 +238,9 @@ async function handleGuestCheckoutSubmit(e) {
   const donorEmail = (document.getElementById('guestDonorEmail') || {}).value || '';
   const amount = parseFloat((document.getElementById('guestAmount') || {}).value || '0');
   const programId = (document.getElementById('guestProgramSelect') || {}).value || 'PRG-001';
-  const channel = (document.getElementById('guestPaymentChannel') || {}).value || 'MANUAL_TRANSFER';
-  const bank = (document.getElementById('guestBank') || {}).value || 'BCA';
+  const channel = (document.getElementById('guestPaymentChannel') || {}).value || 'QRIS_SEABANK';
+  const bankEl = document.getElementById('guestBank');
+  const bank = channel === 'QRIS_SEABANK' ? 'SEABANK' : (bankEl ? bankEl.value : 'SEABANK');
   const isAnon = Boolean((document.getElementById('guestAnonCheck') || {}).checked);
   const consent = Boolean((document.getElementById('guestConsentCheck') || {}).checked);
 
@@ -251,7 +252,7 @@ async function handleGuestCheckoutSubmit(e) {
   const btn = document.getElementById('btnGuestSubmitIntent');
   if (btn) {
     btn.disabled = true;
-    btn.innerText = 'Memproses Instruksi Donasi...';
+    btn.innerText = 'Membuat QRIS Dinamis...';
   }
 
   const requestPayload = {
@@ -260,7 +261,7 @@ async function handleGuestCheckoutSubmit(e) {
     amount: amount,
     program_id: programId,
     payment_channel: channel,
-    bank: channel === 'MANUAL_TRANSFER' ? bank : 'MIDTRANS',
+    bank: channel === 'MIDTRANS_SNAP' ? 'MIDTRANS' : bank,
     is_anonymous: isAnon,
     consent: true
   };
@@ -389,6 +390,31 @@ function renderGuestPaymentInstruction(res) {
         </div>
       </div>
     `;
+  } else if (res.payment_channel === 'QRIS_SEABANK') {
+    const qInfo = res.qris || {};
+    const baseDisp = res.formatted_base_amount || res.formatted_amount;
+    const uniqCode = Number(res.unique_code || qInfo.unique_code || 0);
+    const noticeStyle =
+      qInfo.qris_mode === 'LIVE_DYNAMIC_QRIS'
+        ? 'background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46;'
+        : 'background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E;';
+
+    paymentDetailHtml = `
+      <div style="background: #FFFFFF; border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 12px; text-align: center;">
+        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">QRIS Dinamis &bull; SeaBank Rekening IKA UPI</div>
+        <div id="guestQrContainer" style="display: inline-flex; justify-content: center; padding: 12px; background: #FFFFFF; border: 1px solid var(--border-dim); border-radius: 8px; margin: 12px auto;"></div>
+        <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 800; color: var(--crimson-900); margin-bottom: 4px;">
+          ${escapeGuestHtml(res.formatted_amount)}
+        </div>
+        <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px;">
+          Nominal Donasi: <strong>${escapeGuestHtml(baseDisp)}</strong> + Kode Unik Verifikasi: <strong>Rp ${uniqCode}</strong><br>
+          Kode Referensi Tamu: <code>${escapeGuestHtml(res.ref_code)}</code>
+        </div>
+        <div style="${noticeStyle} border-radius: var(--radius-sm); padding: 8px 10px; font-size: 11px; text-align: left;">
+          ${escapeGuestHtml(qInfo.qris_notice || 'Scan QRIS ini dari GoPay, DANA, OVO, SeaBank, atau m-Banking apa pun. Nominal otomatis terisi.')}
+        </div>
+      </div>
+    `;
   } else {
     const va = res.virtual_account || {};
     paymentDetailHtml = `
@@ -432,9 +458,9 @@ function renderGuestPaymentInstruction(res) {
       qrEl.innerHTML = '';
       new QRCode(qrEl, {
         text: res.qris.qris_payload,
-        width: 140,
-        height: 140,
-        colorDark: '#8B0000',
+        width: 200,
+        height: 200,
+        colorDark: '#111827',
         colorLight: '#FFFFFF'
       });
     }

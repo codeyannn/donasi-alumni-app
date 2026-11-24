@@ -364,8 +364,16 @@ async function handleCreateIntent(e) {
   e.preventDefault();
   const amount = parseFloat(document.getElementById('donationAmount').value);
   const channelSel = document.getElementById('paymentChannelSelect');
-  const channel = channelSel ? channelSel.value : 'MANUAL_TRANSFER';
-  const bank = channel === 'MIDTRANS_SNAP' ? 'MIDTRANS' : document.getElementById('targetBank').value;
+  const channel = channelSel ? channelSel.value : 'QRIS_SEABANK';
+  const targetBankEl = document.getElementById('targetBank');
+  const bank =
+    channel === 'QRIS_SEABANK'
+      ? 'SEABANK'
+      : channel === 'MIDTRANS_SNAP'
+      ? 'MIDTRANS'
+      : targetBankEl
+      ? targetBankEl.value
+      : 'SEABANK';
   const programSelect = document.getElementById('programSelect');
   const programVal = programSelect ? programSelect.value : 'PRG-001';
   const programText =
@@ -381,7 +389,7 @@ async function handleCreateIntent(e) {
 
   const btn = document.getElementById('btnSubmitIntent');
   btn.disabled = true;
-  btn.innerText = channel === 'MIDTRANS_SNAP' ? 'Menyiapkan Midtrans Order...' : 'Membuat Virtual Account & QRIS...';
+  btn.innerText = channel === 'MIDTRANS_SNAP' ? 'Menyiapkan Midtrans Order...' : 'Membuat QRIS Dinamis...';
   const requestId =
     typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function'
       ? window.crypto.randomUUID()
@@ -414,7 +422,7 @@ async function handleCreateIntent(e) {
     alert('Error: ' + err.message);
   } finally {
     btn.disabled = false;
-    btn.innerText = 'Lanjutkan ke Instruksi Transfer';
+    btn.innerText = 'Generate QRIS Pembayaran';
   }
 }
 
@@ -524,6 +532,72 @@ function showMidtransPreparedModal(res) {
 function showTransferInstructionModal(res) {
   const box = document.getElementById('activeIntentBox');
   if (!box) return;
+
+  if (res.payment_channel === 'QRIS_SEABANK') {
+    const qInfo = res.qris || {};
+    const baseDisp = res.formatted_base_amount || res.formatted_amount;
+    const uniqCode = Number(res.unique_code || qInfo.unique_code || 0);
+    const noticeStyle =
+      qInfo.qris_mode === 'LIVE_DYNAMIC_QRIS'
+        ? 'background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46;'
+        : 'background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E;';
+
+    box.style.display = 'block';
+    box.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <span class="badge badge-pending" style="margin-bottom: 4px;">QRIS Dinamis &bull; SeaBank Rekening IKA UPI</span>
+          <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--crimson-900);">
+            Total Scan QRIS: ${escapeApp(res.formatted_amount)}
+          </h3>
+        </div>
+        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="closeInstructionBox()">Tutup</button>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 18px; margin-bottom: 14px; text-align: center;">
+        <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">Scan QRIS (GoPay, DANA, OVO, SeaBank, &amp; Semua Bank)</div>
+        <div style="font-size: 15px; font-weight: 800; color: var(--crimson-900); margin-bottom: 12px;">BEASISWA IKA UPI (SEABANK)</div>
+
+        <div style="display: flex; justify-content: center; margin-bottom: 12px;">
+          <div id="qrisContainer" style="background: #FFFFFF; padding: 12px; border: 1px solid var(--border-mid); border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); display: inline-block;"></div>
+        </div>
+
+        <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 800; color: var(--crimson-700); margin-bottom: 4px;">
+          ${escapeApp(res.formatted_amount)}
+        </div>
+        <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px;">
+          Nominal Donasi: <strong>${escapeApp(baseDisp)}</strong> + Kode Unik Verifikasi: <strong>Rp ${uniqCode}</strong><br>
+          Program: <strong>${escapeApp(res.program)}</strong> &bull; ID Donatur: <code>${escapeApp(res.ref_code)}</code>
+        </div>
+        <div style="${noticeStyle} border-radius: var(--radius-sm); padding: 8px 12px; font-size: 11px; text-align: left; max-width: 480px; margin: 0 auto;">
+          ${escapeApp(qInfo.qris_notice || 'Scan QRIS ini menggunakan aplikasi bank atau e-wallet mana pun. Nominal otomatis terisi, tinggal konfirmasi PIN.')}
+        </div>
+      </div>
+
+      <div style="background: #FFFDF9; border: 1px solid var(--gold-500); border-radius: var(--radius-sm); padding: 12px; font-size: 12px; color: var(--gold-600); font-weight: 600;">
+        <div id="pollingStatusLabel">Memantau Notifikasi Dana Masuk SeaBank (Cek otomatis per 5 detik)...</div>
+        <div style="font-size: 11px; color: var(--text-dim); font-weight: 400;" id="pollingCountdownLabel">Pengecekan berikutnya dalam 5 detik</div>
+      </div>
+    `;
+
+    setTimeout(() => {
+      const qrisElem = document.getElementById('qrisContainer');
+      if (qrisElem && window.QRCode) {
+        qrisElem.innerHTML = '';
+        new QRCode(qrisElem, {
+          text: qInfo.qris_payload || '',
+          width: 210,
+          height: 210,
+          colorDark: '#111827',
+          colorLight: '#FFFFFF',
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+    }, 50);
+
+    window.scrollTo({ top: box.offsetTop - 80, behavior: 'smooth' });
+    return;
+  }
 
   const va = res.virtual_account || {
     va_number: '895081000471',

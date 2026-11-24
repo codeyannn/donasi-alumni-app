@@ -106,7 +106,7 @@
         <div class="grid-cols-2">
           <div class="form-group">
             <label for="guestAmount">Nominal Donasi (IDR)</label>
-            <input type="number" id="guestAmount" class="form-control" min="10000" step="5000" placeholder="Minimal 10000" required>
+            <input type="number" id="guestAmount" class="form-control" min="100" step="1" placeholder="Minimal Rp 100" required>
           </div>
           <div class="form-group">
             <label for="guestProgramSelect">Program Donasi</label>
@@ -116,23 +116,13 @@
           </div>
         </div>
 
-        <div class="grid-cols-2">
-          <div class="form-group">
-            <label for="guestPaymentChannel">Metode Pembayaran</label>
-            <select id="guestPaymentChannel" class="form-control" onchange="handleGuestChannelChange()">
-              <option value="MANUAL_TRANSFER">Transfer Bank Manual (VA & QRIS 5 Bank)</option>
-              <option value="MIDTRANS_SNAP">Midtrans Snap Sandbox (Persiapan P5)</option>
-            </select>
-          </div>
-          <div class="form-group" id="guestBankGroup">
-            <label for="guestBank">Bank Tujuan Rekening IKA UPI</label>
-            <select id="guestBank" class="form-control">
-              <option value="BCA">Bank Central Asia (BCA)</option>
-              <option value="BSI">Bank Syariah Indonesia (BSI)</option>
-              <option value="MANDIRI">Bank Mandiri</option>
-              <option value="BNI">Bank Negara Indonesia (BNI)</option>
-              <option value="BRI">Bank Rakyat Indonesia (BRI)</option>
-            </select>
+        <div class="form-group">
+          <label for="guestPaymentChannel">Metode Pembayaran</label>
+          <select id="guestPaymentChannel" class="form-control">
+            <option value="QRIS_SEABANK" selected>QRIS Dinamis — SeaBank Rekening IKA UPI (GoPay, DANA, OVO, &amp; Semua Bank)</option>
+          </select>
+          <div style="font-size: 11px; color: var(--text-dim); margin-top: 6px;">
+            Nominal otomatis terisi saat scan QRIS (termasuk kode unik Rp 1–99 untuk verifikasi otomatis mutasi SeaBank).
           </div>
         </div>
 
