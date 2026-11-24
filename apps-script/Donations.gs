@@ -151,6 +151,35 @@ function buildPaymentInstructionPayload_(params) {
     return baseOut;
   }
 
+  if (channel === 'QRIS_SEABANK') {
+    const baseAmt = params.base_amount !== undefined ? params.base_amount : amount;
+    const uniqueCode = params.unique_code !== undefined ? params.unique_code : 0;
+    const staticQris =
+      typeof getSecureConfig_ === 'function' ? getSecureConfig_('QRIS_STATIC_PAYLOAD', false) : '';
+
+    // Preview fallback uses a structurally valid EMVCo QRIS skeleton until real merchant static QRIS is stored in ScriptProperties
+    const fallbackStatic =
+      '00020101021126570011ID.DANA.WWW011893600915000000000102150000000000000010303UMI51440014ID.CO.QRIS.WWW0215ID00000000000010303UMI5204839853033605802ID5923BEASISWA IKATAN ALUMNI6007BANDUNG6105401546304';
+    const isLiveQris = Boolean(staticQris && staticQris.indexOf('5802ID') !== -1);
+    const dynamicQris = generateDynamicQrisPayload(isLiveQris ? staticQris : fallbackStatic, amount);
+
+    baseOut.base_amount = baseAmt;
+    baseOut.unique_code = uniqueCode;
+    baseOut.formatted_base_amount = formatRupiah(baseAmt);
+    baseOut.qris = {
+      merchant_name: 'BEASISWA IKA UPI (SeaBank)',
+      qris_payload: dynamicQris,
+      amount: amount,
+      base_amount: baseAmt,
+      unique_code: uniqueCode,
+      qris_mode: isLiveQris ? 'LIVE_DYNAMIC_QRIS' : 'PREVIEW_NOT_CONFIGURED',
+      qris_notice: isLiveQris
+        ? 'Scan QRIS ini dari GoPay, DANA, OVO, SeaBank, atau m-Banking apa pun. Nominal sudah terisi otomatis.'
+        : 'QRIS Statis Merchant (QRIS_STATIC_PAYLOAD) belum diisi di ScriptProperties GAS — QR ini masih mode preview.'
+    };
+    return baseOut;
+  }
+
   // Generate 12-digit Bank Virtual Account and dynamic QRIS payload for manual reconciliation
   const vaInfo = generateVirtualAccount(params.bank, params.ref_code);
   const qrisString =
@@ -177,6 +206,34 @@ function buildPaymentInstructionPayload_(params) {
     note_instruction: 'PENTING: Salin nomor Virtual Account di atas atau scan QRIS melalui m-banking/e-wallet Anda.'
   };
   return baseOut;
+}
+
+/**
+ * Collects amounts of currently active (non-expired) PENDING intents for a given bank
+ * so QRIS unique-code allocation avoids collisions.
+ */
+function getActivePendingAmountsForBank_(intentSheet, bankName) {
+  const amounts = [];
+  if (!intentSheet || intentSheet.getLastRow() <= 1) return amounts;
+  const hMap = getHeaderMap_(intentSheet);
+  const rows = intentSheet.getDataRange().getValues();
+  const targetBank = String(bankName || '').toUpperCase().trim();
+  const nowMs = Date.now();
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const status = String(row[hMap.status !== undefined ? hMap.status : 6] || '').toUpperCase().trim();
+    const bank = String(row[hMap.bank !== undefined ? hMap.bank : 4] || '').toUpperCase().trim();
+    if (status !== 'PENDING' || bank !== targetBank) continue;
+
+    const expRaw = row[hMap.expires_at !== undefined ? hMap.expires_at : 8];
+    const expMs = expRaw ? new Date(expRaw).getTime() : 0;
+    if (expMs && !isNaN(expMs) && expMs < nowMs) continue;
+
+    const amt = parseFloat(row[hMap.amount !== undefined ? hMap.amount : 3]) || 0;
+    if (amt > 0) amounts.push(amt);
+  }
+  return amounts;
 }
 
 /**
@@ -230,7 +287,9 @@ function createDonationIntent(idToken, data) {
   }
 
   let bank = String(input.bank || '').toUpperCase().trim();
-  if (channel === 'MANUAL_TRANSFER') {
+  if (channel === 'QRIS_SEABANK') {
+    bank = 'SEABANK';
+  } else if (channel === 'MANUAL_TRANSFER') {
     if (SUPPORTED_BANKS.indexOf(bank) === -1) {
       throw new Error('Bank tidak didukung. Pilihan: ' + SUPPORTED_BANKS.join(', '));
     }
@@ -272,11 +331,22 @@ function createDonationIntent(idToken, data) {
     const orderId = channel === 'MIDTRANS_SNAP' ? formatMidtransOrderId(refCode, intentId) : '';
     const donorType = userRole === 'GUEST' ? 'GUEST' : 'ALUMNI';
 
+    let finalAmount = amount;
+    let baseAmount = amount;
+    let uniqueCode = 0;
+    if (channel === 'QRIS_SEABANK') {
+      const pendingAmounts = getActivePendingAmountsForBank_(intentSheet, 'SEABANK');
+      const alloc = allocateUniqueDonationAmount(amount, pendingAmounts);
+      baseAmount = alloc.base_amount;
+      uniqueCode = alloc.unique_code;
+      finalAmount = alloc.payable_amount;
+    }
+
     let snapResult = { snap_token: '', redirect_url: '', payment_mode: 'MIDTRANS_SANDBOX_PREPARED' };
     if (channel === 'MIDTRANS_SNAP' && typeof createMidtransSnapTransaction_ === 'function') {
       snapResult = createMidtransSnapTransaction_({
         order_id: orderId,
-        amount: amount,
+        amount: finalAmount,
         program_id: resolvedProgram.program_id,
         program_name: resolvedProgram.name,
         donor_name: user.full_name,
@@ -291,7 +361,7 @@ function createDonationIntent(idToken, data) {
       intent_id: intentId,
       user_id: user.user_id,
       ref_code: refCode,
-      amount: amount,
+      amount: finalAmount,
       bank: bank,
       program: resolvedProgram.name,
       status: 'PENDING',
@@ -312,7 +382,7 @@ function createDonationIntent(idToken, data) {
       user.email,
       'CREATE_INTENT',
       intentId,
-      channel + ' ' + bank + ' ' + amount + ' prog=' + resolvedProgram.program_id
+      channel + ' ' + bank + ' ' + finalAmount + ' prog=' + resolvedProgram.program_id
     );
 
     const responsePayload = buildPaymentInstructionPayload_({
@@ -322,7 +392,9 @@ function createDonationIntent(idToken, data) {
       donor_label: user.full_name,
       payment_channel: channel,
       bank: bank,
-      amount: amount,
+      amount: finalAmount,
+      base_amount: baseAmount,
+      unique_code: uniqueCode,
       program_name: resolvedProgram.name,
       program_id: resolvedProgram.program_id,
       is_anonymous: isAnon,
@@ -640,11 +712,22 @@ function createGuestDonationIntent(data) {
     const tokenExpiresAt = new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
     const orderId = clean.payment_channel === 'MIDTRANS_SNAP' ? formatMidtransOrderId(refCode, intentId) : '';
 
+    let guestFinalAmount = clean.amount;
+    let guestBaseAmount = clean.amount;
+    let guestUniqueCode = 0;
+    if (clean.payment_channel === 'QRIS_SEABANK') {
+      const pendingAmounts = getActivePendingAmountsForBank_(intentSheet, 'SEABANK');
+      const alloc = allocateUniqueDonationAmount(clean.amount, pendingAmounts);
+      guestBaseAmount = alloc.base_amount;
+      guestUniqueCode = alloc.unique_code;
+      guestFinalAmount = alloc.payable_amount;
+    }
+
     let snapResult = { snap_token: '', redirect_url: '', payment_mode: 'MIDTRANS_SANDBOX_PREPARED' };
     if (clean.payment_channel === 'MIDTRANS_SNAP' && typeof createMidtransSnapTransaction_ === 'function') {
       snapResult = createMidtransSnapTransaction_({
         order_id: orderId,
-        amount: clean.amount,
+        amount: guestFinalAmount,
         program_id: resolvedProgram.program_id,
         program_name: resolvedProgram.name,
         donor_name: clean.donor_name,
@@ -660,7 +743,7 @@ function createGuestDonationIntent(data) {
       intent_id: intentId,
       user_id: '', // Accountless Guest: zero record created in users sheet
       ref_code: refCode,
-      amount: clean.amount,
+      amount: guestFinalAmount,
       bank: clean.bank,
       program: resolvedProgram.name,
       status: 'PENDING',
@@ -698,7 +781,7 @@ function createGuestDonationIntent(data) {
       'GUEST_CHECKOUT',
       'CREATE_GUEST_INTENT',
       intentId,
-      'ref=' + refCode + ' channel=' + clean.payment_channel + ' amount=' + clean.amount
+      'ref=' + refCode + ' channel=' + clean.payment_channel + ' amount=' + guestFinalAmount
     );
 
     const responsePayload = buildPaymentInstructionPayload_({
@@ -708,7 +791,9 @@ function createGuestDonationIntent(data) {
       donor_label: clean.is_anonymous === 'YES' ? 'DONATUR ANONIM' : clean.donor_name,
       payment_channel: clean.payment_channel,
       bank: clean.bank,
-      amount: clean.amount,
+      amount: guestFinalAmount,
+      base_amount: guestBaseAmount,
+      unique_code: guestUniqueCode,
       program_name: resolvedProgram.name,
       program_id: resolvedProgram.program_id,
       is_anonymous: clean.is_anonymous,

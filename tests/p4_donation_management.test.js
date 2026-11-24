@@ -462,13 +462,13 @@ function runTests() {
     const h = createP4Harness({ useV2TestFixture: true });
     const usersBefore = h.sheets.users.getLastRow();
 
-    // Validation failures: bad email, nominal < 10000, missing consent, > MAX_DONATION_AMOUNT
+    // Validation failures: bad email, nominal < 100, missing consent, > MAX_DONATION_AMOUNT
     assert.strictEqual(
       h.post({ action: "create_guest_intent", donor_name: "A", donor_email: "bad-email", amount: 50000, bank: "BCA", program_id: "PRG-001", consent: true }).status,
       "error"
     );
     assert.strictEqual(
-      h.post({ action: "create_guest_intent", donor_name: "Budi", donor_email: "budi@mail.com", amount: 5000, bank: "BCA", program_id: "PRG-001", consent: true }).status,
+      h.post({ action: "create_guest_intent", donor_name: "Budi", donor_email: "budi@mail.com", amount: 50, bank: "BCA", program_id: "PRG-001", consent: true }).status,
       "error"
     );
     assert.strictEqual(

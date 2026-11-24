@@ -883,4 +883,70 @@ function applyMidtransReversalInPlace_(ss, txSheet, intentId, orderId, reversalS
   };
 }
 
+/**
+ * Polls Gmail for incoming SeaBank / QRIS credit notifications and feeds them into handleWebhookMutations_.
+ * Designed to run on a 1-minute Apps Script Time-Driven Trigger once SeaBank email notifications are active.
+ *
+ * @returns {Object} Polling summary { status, threads_scanned, mutations_parsed, webhook_result }.
+ */
+function pollSeabankGmailNotifications() {
+  if (typeof GmailApp === 'undefined') {
+    return { status: 'error', message: 'GmailApp is only available inside Google Apps Script runtime.' };
+  }
+
+  const labelName = 'DonasiAlumni_Processed';
+  const query =
+    getSecureConfig_('SEABANK_GMAIL_QUERY', true) ||
+    '(from:alerts@seabank.co.id OR from:seabank) -label:' + labelName + ' newer_than:2d';
+
+  let label = GmailApp.getUserLabelByName(labelName);
+  if (!label) {
+    label = GmailApp.createLabel(labelName);
+  }
+
+  const threads = GmailApp.search(query, 0, 20);
+  const mutations = [];
+  const processedThreads = [];
+
+  for (let i = 0; i < threads.length; i++) {
+    const messages = threads[i].getMessages();
+    let threadHadValidMutation = false;
+
+    for (let j = 0; j < messages.length; j++) {
+      const msg = messages[j];
+      const parsed = parseSeabankNotificationEmail(msg.getSubject(), msg.getPlainBody() || msg.getBody());
+      if (parsed && parsed.amount > 0) {
+        mutations.push({
+          mutation_id: 'GMAIL_' + msg.getId(),
+          bank: 'SEABANK',
+          type: 'CR',
+          amount: parsed.amount,
+          description: parsed.description,
+          transaction_date: Utilities.formatDate(msg.getDate(), 'Asia/Jakarta', 'yyyy-MM-dd HH:mm:ss')
+        });
+        threadHadValidMutation = true;
+      }
+    }
+
+    if (threadHadValidMutation) {
+      processedThreads.push(threads[i]);
+    }
+  }
+
+  let webhookResult = null;
+  if (mutations.length > 0) {
+    webhookResult = handleWebhookMutations_(mutations);
+    for (let k = 0; k < processedThreads.length; k++) {
+      processedThreads[k].addLabel(label);
+    }
+  }
+
+  return {
+    status: 'ok',
+    threads_scanned: threads.length,
+    mutations_parsed: mutations.length,
+    webhook_result: webhookResult
+  };
+}
+
 

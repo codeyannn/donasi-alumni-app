@@ -5,8 +5,8 @@
  * Virtual Account generation & decoding, and 3-tier transaction matching.
  */
 
-// Supported banks for the scholarship donation system
-const SUPPORTED_BANKS = ['BSI', 'MANDIRI', 'BCA', 'BNI', 'BRI'];
+// Supported banks for the scholarship donation system (SEABANK added for direct QRIS SeaBank flow)
+const SUPPORTED_BANKS = ['SEABANK', 'BSI', 'MANDIRI', 'BCA', 'BNI', 'BRI'];
 
 // Standard 5-digit Bank Virtual Account prefixes for Beasiswa IKA UPI
 const BANK_VA_PREFIXES = {
@@ -686,8 +686,9 @@ function validateProofFileMetadata(fileMime, fileName, byteLength) {
 /**
  * Supported payment channels for donation intent creation.
  */
-var SUPPORTED_PAYMENT_CHANNELS = ['MANUAL_TRANSFER', 'MIDTRANS_SNAP'];
-var DEFAULT_MIN_DONATION_AMOUNT = 10000;
+var SUPPORTED_PAYMENT_CHANNELS = ['QRIS_SEABANK', 'MANUAL_TRANSFER', 'MIDTRANS_SNAP'];
+// Minimum donation lowered to Rp 100 per real-payment QRIS SeaBank requirement
+var DEFAULT_MIN_DONATION_AMOUNT = 100;
 var DEFAULT_MAX_DONATION_AMOUNT = 100000000;
 
 /**
@@ -980,7 +981,7 @@ function validateDonationAmount(rawAmount, maxAmount) {
     return { ok: false, amount: 0, error: 'Nominal donasi harus berupa bilangan bulat rupiah yang valid.' };
   }
   if (amount < DEFAULT_MIN_DONATION_AMOUNT) {
-    return { ok: false, amount: 0, error: 'Nominal donasi minimal Rp 10.000.' };
+    return { ok: false, amount: 0, error: 'Nominal donasi minimal Rp ' + DEFAULT_MIN_DONATION_AMOUNT.toLocaleString('id-ID') + '.' };
   }
   if (amount > ceil) {
     return { ok: false, amount: 0, error: 'Nominal donasi melebihi batas maksimal transaksi (' + formatRupiah(ceil) + ').' };
@@ -1038,7 +1039,9 @@ function validateGuestDonorInput(data, maxAmount) {
   }
 
   let bank = String(input.bank || '').trim().toUpperCase();
-  if (channel === 'MANUAL_TRANSFER') {
+  if (channel === 'QRIS_SEABANK') {
+    bank = 'SEABANK';
+  } else if (channel === 'MANUAL_TRANSFER') {
     if (SUPPORTED_BANKS.indexOf(bank) === -1) {
       return { ok: false, error: 'Bank tujuan tidak didukung. Pilihan: ' + SUPPORTED_BANKS.join(', ') };
     }
@@ -1056,6 +1059,134 @@ function validateGuestDonorInput(data, maxAmount) {
       bank: bank,
       is_anonymous: input.is_anonymous === true || String(input.is_anonymous).toUpperCase() === 'YES' ? 'YES' : 'NO'
     }
+  };
+}
+
+/**
+ * Computes ISO/IEC 13239 CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) required by EMVCo QRIS Tag 63.
+ */
+function computeCrc16Ccitt(str) {
+  let crc = 0xffff;
+  const input = String(str || '');
+  for (let i = 0; i < input.length; i++) {
+    crc ^= input.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = ((crc << 1) ^ 0x1021) & 0xffff;
+      } else {
+        crc = (crc << 1) & 0xffff;
+      }
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+/**
+ * Converts a static EMVCo QRIS string (000201010211...) into a dynamic QRIS with locked Tag 54 amount
+ * and recomputed Tag 63 CRC-16/CCITT-FALSE so any Indonesian bank/e-wallet pre-fills the exact nominal.
+ */
+function generateDynamicQrisPayload(staticQris, amount) {
+  const raw = String(staticQris || '').trim();
+  const numAmount = Math.round(Number(amount) || 0);
+  if (!raw || numAmount <= 0) {
+    throw new Error('Static QRIS payload dan nominal positif wajib tersedia.');
+  }
+
+  // Strip existing trailing CRC tag 6304XXXX if present
+  let body = raw.replace(/6304[0-9A-Fa-f]{4}$/, '');
+
+  // Switch Point of Initiation Method from static (010211) to dynamic (010212)
+  body = body.replace('010211', '010212');
+
+  const countryIdx = body.indexOf('5802ID');
+  if (countryIdx === -1) {
+    throw new Error('Format QRIS statis tidak valid: penanda negara 5802ID tidak ditemukan.');
+  }
+
+  let beforeCountry = body.slice(0, countryIdx);
+  const fromCountry = body.slice(countryIdx);
+
+  // Remove any pre-existing Tag 54 (Transaction Amount) before re-injecting the requested amount
+  beforeCountry = beforeCountry.replace(/54(\d{2})([0-9.]+)/g, function (full, lenStr, val) {
+    const len = parseInt(lenStr, 10);
+    return val.length >= len ? val.slice(len) : full;
+  });
+
+  const amtStr = String(numAmount);
+  const tag54 = '54' + String(amtStr.length).padStart(2, '0') + amtStr;
+  const payloadWithCrcTag = beforeCountry + tag54 + fromCountry + '6304';
+  return payloadWithCrcTag + computeCrc16Ccitt(payloadWithCrcTag);
+}
+
+/**
+ * Allocates a unique payable nominal (baseAmount + uniqueCode) that does not collide
+ * with any currently active PENDING intent amount for SeaBank QRIS auto-matching.
+ */
+function allocateUniqueDonationAmount(baseAmount, activePendingAmounts) {
+  const base = Math.round(Number(baseAmount) || 0);
+  const used = new Set();
+  (activePendingAmounts || []).forEach(function (val) {
+    const n = Math.round(Number(val) || 0);
+    if (n > 0) used.add(n);
+  });
+
+  // Prefer 2-digit unique codes (1..99) first, then expand to 100..999 if busy
+  for (let code = 1; code <= 99; code++) {
+    if (!used.has(base + code)) {
+      return { base_amount: base, unique_code: code, payable_amount: base + code };
+    }
+  }
+  for (let code = 100; code <= 999; code++) {
+    if (!used.has(base + code)) {
+      return { base_amount: base, unique_code: code, payable_amount: base + code };
+    }
+  }
+  // shortcut: falls back to base amount when >999 concurrent pending intents share the exact same base nominal
+  return { base_amount: base, unique_code: 0, payable_amount: base };
+}
+
+/**
+ * Parses a SeaBank incoming funds / QRIS email notification into a structured credit mutation.
+ * Returns null if the email does not represent an incoming credit (e.g. debit/outgoing transfer).
+ */
+function parseSeabankNotificationEmail(subject, body) {
+  const subj = String(subject || '').trim();
+  const text = String(body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const combined = subj + ' ' + text;
+
+  // Reject outgoing / debit notifications (including SeaBank Top Up e-Wallet) so only incoming credits are recorded
+  if (/(top\s*up\s*e-?wallet|berhasil dikirim|transfer keluar|pembayaran ke|debit|tarik tunai|keluar dari rekening)/i.test(combined)) {
+    return null;
+  }
+
+  // Prefer explicit 'Jumlah' row amount when present in SeaBank HTML/text alert tables, else fallback to first IDR/Rp amount
+  const jumlahMatch = text.match(/Jumlah\s*:?\s*(?:Rp\.?|IDR)\s*([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]+)(?:[.,]00)?\b/i);
+  const amtMatch = jumlahMatch || combined.match(/(?:Rp\.?|IDR)\s*([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]+)(?:[.,]00)?\b/i);
+  if (!amtMatch) {
+    return null;
+  }
+  const normalizedNum = amtMatch[1].replace(/[.,]/g, '');
+  const amount = parseInt(normalizedNum, 10) || 0;
+  if (amount <= 0) {
+    return null;
+  }
+
+  // Extract optional sender name from SeaBank table ("Transfer Dari ...") or narrative ("dari ...")
+  let senderName = '';
+  const tableSender = text.match(/Transfer\s+Dari\s*:?\s*([A-Za-z][A-Za-z0-9 .,'-]{1,60}?)(?:\s*-\s*\d+|\s+Rekening|\s+Jumlah|$)/i);
+  const narrativeSender = text.match(/(?:dari|from)\s+([A-Za-z][A-Za-z0-9 .,'-]{1,60}?)(?:\s+(?:sebesar|pada|ke|via|melalui|di|sejumlah|\.|,|$))/i);
+  if (tableSender && tableSender[1]) {
+    senderName = cleanNameToken(tableSender[1]);
+  } else if (narrativeSender && narrativeSender[1]) {
+    senderName = cleanNameToken(narrativeSender[1]);
+  }
+
+  return {
+    bank: 'SEABANK',
+    type: 'CR',
+    amount: amount,
+    sender_name: senderName,
+    description: ('SEABANK QRIS ' + (senderName ? 'DARI ' + senderName + ' ' : '') + subj).trim().slice(0, 200)
   };
 }
 
@@ -1094,6 +1225,10 @@ if (typeof module !== 'undefined' && module.exports) {
     mapMidtransTransactionState,
     validateDonationAmount,
     isValidEmailFormat,
-    validateGuestDonorInput
+    validateGuestDonorInput,
+    computeCrc16Ccitt,
+    generateDynamicQrisPayload,
+    allocateUniqueDonationAmount,
+    parseSeabankNotificationEmail
   };
 }

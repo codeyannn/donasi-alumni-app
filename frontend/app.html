@@ -51,7 +51,7 @@
       <h3 class="card-title">Salurkan Donasi</h3>
       <div id="donationLockNotice" style="display: none; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px; font-size: 13px;"></div>
       <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 20px;">
-        Pilih nominal dan bank tujuan. Sistem akan menerbitkan instruksi transfer dan memverifikasi mutasi bank secara otomatis.
+        Isi nominal donasi dan pilih alokasi program. Sistem menerbitkan QRIS Dinamis tujuan <strong>SeaBank Rekening IKA UPI</strong> dengan nominal otomatis terisi saat di-scan.
       </p>
 
       <form id="intentForm" onsubmit="handleCreateIntent(event)">
@@ -59,33 +59,24 @@
           
           <div class="form-group">
             <label for="donationAmount">Nominal Donasi (IDR)</label>
-            <input type="number" id="donationAmount" class="form-control" placeholder="Contoh: 100000" min="10000" step="5000" required>
+            <input type="number" id="donationAmount" class="form-control" placeholder="Minimal Rp 100" min="100" step="1" required>
             <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(100)">Rp 100</button>
+              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(1000)">1 rb</button>
+              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(10000)">10 rb</button>
               <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(50000)">50 rb</button>
               <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(100000)">100 rb</button>
-              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(250000)">250 rb</button>
-              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(500000)">500 rb</button>
-              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="setAmount(1000000)">1 jt</button>
             </div>
           </div>
 
           <div class="form-group">
             <label for="paymentChannelSelect">Metode Pembayaran</label>
-            <select id="paymentChannelSelect" class="form-control" onchange="handleAlumniChannelChange()">
-              <option value="MANUAL_TRANSFER">Transfer Bank Manual (VA & QRIS 5 Bank)</option>
-              <option value="MIDTRANS_SNAP">Midtrans Snap Sandbox (Persiapan P5)</option>
+            <select id="paymentChannelSelect" class="form-control">
+              <option value="QRIS_SEABANK" selected>QRIS Dinamis — SeaBank Rekening IKA UPI (GoPay, DANA, OVO, &amp; Semua Bank)</option>
             </select>
-          </div>
-
-          <div class="form-group" id="targetBankGroup">
-            <label for="targetBank">Bank Tujuan Rekening IKA UPI</label>
-            <select id="targetBank" class="form-control" required>
-              <option value="BSI">Bank Syariah Indonesia (BSI)</option>
-              <option value="BCA">Bank Central Asia (BCA)</option>
-              <option value="MANDIRI">Bank Mandiri</option>
-              <option value="BNI">Bank Negara Indonesia (BNI)</option>
-              <option value="BRI">Bank Rakyat Indonesia (BRI)</option>
-            </select>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 6px;">
+              Nominal otomatis terisi saat scan QRIS (termasuk kode unik Rp 1–99 untuk verifikasi otomatis mutasi SeaBank).
+            </div>
           </div>
 
         </div>
@@ -107,7 +98,7 @@
         </div>
 
         <button type="submit" id="btnSubmitIntent" class="btn btn-primary" style="padding: 10px 22px;">
-          Lanjutkan ke Instruksi Transfer
+          Generate QRIS Pembayaran
         </button>
       </form>
     </div>

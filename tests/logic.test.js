@@ -17,7 +17,12 @@ const {
   parseDonorName,
   detectProgram,
   matchTransaction,
-  formatRupiah
+  formatRupiah,
+  computeCrc16Ccitt,
+  generateDynamicQrisPayload,
+  allocateUniqueDonationAmount,
+  parseSeabankNotificationEmail,
+  validateDonationAmount
 } = require('../apps-script/Logic.gs');
 
 console.log('🧪 RUNNING UNIT TESTS FOR LOGIC.GS (WITH VIRTUAL ACCOUNT & QRIS LOGIC)...\n');
@@ -226,6 +231,42 @@ it('matchTransaction Tier 3: routes to UNMATCHED review queue when collision occ
   assert.strictEqual(res.status, 'UNMATCHED');
   assert.strictEqual(res.tier, 3);
   assert.strictEqual(res.candidates_count, 2);
+});
+
+it('generateDynamicQrisPayload converts static QRIS to dynamic with Tag 54 & valid CRC-16/CCITT-FALSE', () => {
+  const staticSample =
+    '00020101021126570011ID.DANA.WWW011893600915000000000102150000000000000010303UMI51440014ID.CO.QRIS.WWW0215ID00000000000010303UMI5204839853033605802ID5923BEASISWA IKATAN ALUMNI6007BANDUNG6105401546304ABCD';
+  const dyn = generateDynamicQrisPayload(staticSample, 117);
+  assert.ok(dyn.includes('010212'), 'Point of Initiation must be dynamic (010212)');
+  assert.ok(dyn.includes('54031175802ID'), 'Tag 54 amount 117 must be injected before 5802ID');
+  const bodyWithoutCrc = dyn.slice(0, -4);
+  const crcPart = dyn.slice(-4);
+  assert.strictEqual(crcPart, computeCrc16Ccitt(bodyWithoutCrc), 'CRC-16/CCITT-FALSE must match');
+});
+
+it('allocateUniqueDonationAmount avoids colliding active pending amounts and allows min Rp 100', () => {
+  assert.strictEqual(validateDonationAmount(100).ok, true);
+  assert.strictEqual(validateDonationAmount(99).ok, false);
+  const alloc = allocateUniqueDonationAmount(100, [101, 102]);
+  assert.strictEqual(alloc.base_amount, 100);
+  assert.strictEqual(alloc.unique_code, 3);
+  assert.strictEqual(alloc.payable_amount, 103);
+});
+
+it('parseSeabankNotificationEmail rejects outgoing Top Up e-Wallet alerts and parses incoming credits', () => {
+  const debitRes = parseSeabankNotificationEmail(
+    'Notifikasi Top Up e-Wallet di SeaBank',
+    'Jenis Transaksi: Top Up e-wallet Transfer Dari MUHAMMAD MAULANA ADRIAN Jumlah IDR 11.600 Biaya Rp1.000'
+  );
+  assert.strictEqual(debitRes, null, 'Outgoing Top Up e-Wallet must be ignored');
+
+  const creditRes = parseSeabankNotificationEmail(
+    'Notifikasi Transfer Masuk di SeaBank',
+    'Dana masuk berhasil diterima. Transfer Dari BUDI SANTOSO - 1234 Jumlah IDR 10.017'
+  );
+  assert.ok(creditRes, 'Incoming SeaBank credit must be parsed');
+  assert.strictEqual(creditRes.bank, 'SEABANK');
+  assert.strictEqual(creditRes.amount, 10017);
 });
 
 console.log(`\n==========================================`);
