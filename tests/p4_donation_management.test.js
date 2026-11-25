@@ -530,6 +530,43 @@ function runTests() {
 
     // Guest cannot call my_donations without Google user account
     assert.strictEqual(h.post({ action: "my_donations", access_token: g1.access_token }).status, "error");
+
+    // Two concurrent QRIS_SEABANK donations with same base amount must get distinct unique amounts & 15-min single-use expiry
+    const q1 = h.post({
+      action: "create_guest_intent",
+      donor_name: "QRIS Satu",
+      donor_email: "qris1@mail.com",
+      amount: 100,
+      payment_channel: "QRIS_SEABANK",
+      program_id: "PRG-001",
+      consent: true,
+    });
+    const q2 = h.post({
+      action: "create_guest_intent",
+      donor_name: "QRIS Dua",
+      donor_email: "qris2@mail.com",
+      amount: 100,
+      payment_channel: "QRIS_SEABANK",
+      program_id: "PRG-001",
+      consent: true,
+    });
+    assert.strictEqual(q1.status, "ok");
+    assert.strictEqual(q2.status, "ok");
+    assert.notStrictEqual(q1.amount, q2.amount, "Concurrent QRIS donors must not share the same payable amount");
+    assert.notStrictEqual(q1.qris.qris_payload, q2.qris.qris_payload, "Concurrent QRIS donors must receive unique QR payloads");
+
+    // Once expires_at passes, check_intent must mark single-use QRIS as EXPIRED
+    const intentRows = h.sheets.donation_intents._rows;
+    const ihMap = {};
+    intentRows[0].forEach((col, idx) => { ihMap[col] = idx; });
+    for (let r = 1; r < intentRows.length; r++) {
+      if (intentRows[r][ihMap.intent_id] === q1.intent_id) {
+        intentRows[r][ihMap.expires_at] = new Date(Date.now() - 60000).toISOString();
+      }
+    }
+    const expCheck = h.post({ action: "check_intent", intent_id: q1.intent_id, access_token: q1.access_token });
+    assert.strictEqual(expCheck.status, "ok");
+    assert.strictEqual(expCheck.intent_status, "EXPIRED");
   });
 
   test("Secure 256-bit Guest Access Token: entropy, hashed storage, pepper fail-closed, anti-IDOR, rate-limit, & zero log leak", () => {

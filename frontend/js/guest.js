@@ -7,6 +7,7 @@
 var GUEST_SESSION_STORAGE_KEY = 'DONASI_GUEST_SESSION';
 var GUEST_PENDING_REQ_STORAGE_KEY = 'DONASI_GUEST_PENDING_REQ';
 let guestPollingTimer = null;
+let guestCountdownTimer = null;
 let guestRequestCounter = 0;
 
 /**
@@ -286,7 +287,7 @@ async function handleGuestCheckoutSubmit(e) {
       }
       renderGuestPaymentInstruction(res);
       if (res.access_token) {
-        startGuestIntentPolling(res.intent_id, res.access_token);
+        startGuestIntentPolling(res.intent_id, res.access_token, res.expires_at);
       }
     } else {
       alert('Gagal membuat donasi tamu: ' + ((res && res.message) || 'Terjadi kesalahan'));
@@ -400,18 +401,21 @@ function renderGuestPaymentInstruction(res) {
         : 'background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E;';
 
     paymentDetailHtml = `
-      <div style="background: #FFFFFF; border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 12px; text-align: center;">
-        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">QRIS Dinamis &bull; SeaBank Rekening IKA UPI</div>
+      <div id="guestQrisPaymentCard" style="background: #FFFFFF; border: 1px solid var(--border-mid); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 12px; text-align: center;">
+        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">QRIS Dinamis 1x Pakai &bull; Rekening IKA UPI</div>
         <div id="guestQrContainer" style="display: inline-flex; justify-content: center; padding: 12px; background: #FFFFFF; border: 1px solid var(--border-dim); border-radius: 8px; margin: 12px auto;"></div>
         <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 800; color: var(--crimson-900); margin-bottom: 4px;">
           ${escapeGuestHtml(res.formatted_amount)}
         </div>
-        <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px;">
+        <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 8px;">
           Nominal Donasi: <strong>${escapeGuestHtml(baseDisp)}</strong> + Kode Unik Verifikasi: <strong>Rp ${uniqCode}</strong><br>
           Kode Referensi Tamu: <code>${escapeGuestHtml(res.ref_code)}</code>
         </div>
+        <div id="guestQrisExpiryLabel" style="font-size: 12px; font-weight: 700; color: #B45309; margin-bottom: 10px;">
+          Berlaku 15 menit (1x pembayaran)
+        </div>
         <div style="${noticeStyle} border-radius: var(--radius-sm); padding: 8px 10px; font-size: 11px; text-align: left;">
-          ${escapeGuestHtml(qInfo.qris_notice || 'Scan QRIS ini dari GoPay, DANA, OVO, SeaBank, atau m-Banking apa pun. Nominal otomatis terisi.')}
+          ${escapeGuestHtml(qInfo.qris_notice || 'Scan QRIS ini menggunakan aplikasi bank atau e-wallet yang mendukung QRIS.')}
         </div>
       </div>
     `;
@@ -468,16 +472,92 @@ function renderGuestPaymentInstruction(res) {
 }
 
 /**
- * Polls intent confirmation status using POST body access_token (zero query strings).
+ * Closes single-use Guest QRIS card immediately once MATCHED or EXPIRED so it cannot be rescanned.
  */
-function startGuestIntentPolling(intentId, accessToken) {
-  if (guestPollingTimer) clearInterval(guestPollingTimer);
-  let attempts = 0;
+function lockGuestQrisCard_(state, res, accessToken) {
+  if (guestPollingTimer) {
+    clearInterval(guestPollingTimer);
+    guestPollingTimer = null;
+  }
+  if (guestCountdownTimer) {
+    clearInterval(guestCountdownTimer);
+    guestCountdownTimer = null;
+  }
 
+  const qrCard = document.getElementById('guestQrisPaymentCard');
+  const label = document.getElementById('guestPollingStatusLabel');
+
+  if (state === 'MATCHED') {
+    const receiptHref =
+      'receipt.html#ref=' +
+      encodeURIComponent((res && res.ref_code) || '') +
+      '&token=' +
+      encodeURIComponent(accessToken || '');
+    if (qrCard) {
+      qrCard.style.background = '#ECFDF5';
+      qrCard.style.borderColor = '#A7F3D0';
+      qrCard.innerHTML = `
+        <div style="font-size: 12px; font-weight: 700; color: #047857; text-transform: uppercase;">QRIS 1x Pakai Ditutup &bull; Terverifikasi Lunas</div>
+        <div style="font-size: 16px; font-weight: 800; color: #065F46; margin: 6px 0;">
+          Terima kasih! Donasi ${escapeGuestHtml((res && res.formatted_amount) || '')} telah masuk.
+        </div>
+        <div style="margin-top: 10px;">
+          <a href="${escapeGuestHtml(receiptHref)}" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px; text-decoration: none;">
+            Lihat &amp; Cetak Kuitansi Resmi (${escapeGuestHtml((res && (res.receipt_no || res.tx_id)) || 'MATCHED')})
+          </a>
+        </div>
+      `;
+    }
+    if (label) {
+      label.style.color = '#047857';
+      label.innerHTML = 'Terverifikasi Lunas! QRIS telah dinonaktifkan.';
+    }
+    return;
+  }
+
+  if (qrCard) {
+    qrCard.style.background = '#FEF2F2';
+    qrCard.style.borderColor = '#FECACA';
+    qrCard.innerHTML = `
+      <div style="font-size: 13px; font-weight: 700; color: #991B1B;">QRIS Kedaluwarsa (Waktu Habis)</div>
+      <div style="font-size: 12px; color: #7F1D1D; margin-top: 4px;">
+        QRIS hanya berlaku 1 kali pembayaran sebelum kedaluwarsa. Jangan scan QR ini lagi; klik tombol donasi kembali untuk menerbitkan QRIS baru.
+      </div>
+    `;
+  }
+  if (label) {
+    label.style.color = '#DC2626';
+    label.innerHTML = 'Kedaluwarsa';
+  }
+}
+
+/**
+ * Polls intent confirmation status using POST body access_token and enforces single-use countdown lock.
+ */
+function startGuestIntentPolling(intentId, accessToken, expiresAtIso) {
+  if (guestPollingTimer) clearInterval(guestPollingTimer);
+  if (guestCountdownTimer) clearInterval(guestCountdownTimer);
+
+  const expiryMs = expiresAtIso ? new Date(expiresAtIso).getTime() : Date.now() + 15 * 60 * 1000;
+  guestCountdownTimer = setInterval(() => {
+    const expLabel = document.getElementById('guestQrisExpiryLabel');
+    const remSec = Math.max(0, Math.floor((expiryMs - Date.now()) / 1000));
+    if (expLabel) {
+      const mm = String(Math.floor(remSec / 60)).padStart(2, '0');
+      const ss = String(remSec % 60).padStart(2, '0');
+      expLabel.innerText = `Sisa waktu pembayaran 1x pakai: ${mm}:${ss}`;
+    }
+    if (remSec <= 0) {
+      lockGuestQrisCard_('EXPIRED', null, accessToken);
+    }
+  }, 1000);
+
+  let attempts = 0;
   guestPollingTimer = setInterval(async () => {
     attempts++;
-    if (attempts > 120) {
+    if (attempts > 180) {
       clearInterval(guestPollingTimer);
+      guestPollingTimer = null;
       return;
     }
     try {
@@ -486,22 +566,9 @@ function startGuestIntentPolling(intentId, accessToken) {
         access_token: accessToken
       });
       if (res && res.status === 'ok' && res.intent_status === 'MATCHED') {
-        clearInterval(guestPollingTimer);
-        const label = document.getElementById('guestPollingStatusLabel');
-        if (label) {
-          const receiptHref =
-            'receipt.html#ref=' +
-            encodeURIComponent(res.ref_code || '') +
-            '&token=' +
-            encodeURIComponent(accessToken || '');
-          label.style.color = '#047857';
-          label.innerHTML =
-            'Terverifikasi Lunas! (' +
-            escapeGuestHtml(res.receipt_no || res.tx_id || 'MATCHED') +
-            ') &bull; <a href="' +
-            escapeGuestHtml(receiptHref) +
-            '" style="color: #065F46; text-decoration: underline; font-weight: 700;">Lihat / Cetak Kuitansi</a>';
-        }
+        lockGuestQrisCard_('MATCHED', res, accessToken);
+      } else if (res && res.status === 'ok' && res.intent_status === 'EXPIRED') {
+        lockGuestQrisCard_('EXPIRED', res, accessToken);
       }
     } catch (ignorePollErr) {
       // Silently wait for next polling cycle

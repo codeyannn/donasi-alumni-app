@@ -6,6 +6,7 @@
 
 let currentUser = null;
 let activePollingTimer = null;
+let activeQrisCountdownTimer = null;
 let activeIntentData = null;
 
 function normalizeFrontendStatus(status) {
@@ -414,7 +415,7 @@ async function handleCreateIntent(e) {
       } else {
         showTransferInstructionModal(res);
       }
-      startRealtimePolling(res.intent_id);
+      startRealtimePolling(res.intent_id, res.expires_at);
     } else {
       alert('Gagal membuat instruksi donasi: ' + (res.message || 'Error'));
     }
@@ -565,9 +566,12 @@ function showTransferInstructionModal(res) {
         <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 800; color: var(--crimson-700); margin-bottom: 4px;">
           ${escapeApp(res.formatted_amount)}
         </div>
-        <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px;">
+        <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 8px;">
           Nominal Donasi: <strong>${escapeApp(baseDisp)}</strong> + Kode Unik Verifikasi: <strong>Rp ${uniqCode}</strong><br>
           Program: <strong>${escapeApp(res.program)}</strong> &bull; ID Donatur: <code>${escapeApp(res.ref_code)}</code>
+        </div>
+        <div id="alumniQrisExpiryLabel" style="font-size: 12px; font-weight: 700; color: #B45309; margin-bottom: 10px;">
+          Berlaku 15 menit (1x pembayaran)
         </div>
         <div style="${noticeStyle} border-radius: var(--radius-sm); padding: 8px 12px; font-size: 11px; text-align: left; max-width: 480px; margin: 0 auto;">
           ${escapeApp(qInfo.qris_notice || 'Scan QRIS ini menggunakan aplikasi bank atau e-wallet mana pun. Nominal otomatis terisi, tinggal konfirmasi PIN.')}
@@ -736,15 +740,64 @@ function closeInstructionBox() {
     clearInterval(activePollingTimer);
     activePollingTimer = null;
   }
+  if (activeQrisCountdownTimer) {
+    clearInterval(activeQrisCountdownTimer);
+    activeQrisCountdownTimer = null;
+  }
   document.getElementById('activeIntentBox').style.display = 'none';
+}
+
+function handleAlumniQrisExpired_() {
+  if (activePollingTimer) {
+    clearInterval(activePollingTimer);
+    activePollingTimer = null;
+  }
+  if (activeQrisCountdownTimer) {
+    clearInterval(activeQrisCountdownTimer);
+    activeQrisCountdownTimer = null;
+  }
+  const box = document.getElementById('activeIntentBox');
+  if (!box) return;
+  box.style.background = '#FEF2F2';
+  box.style.borderTop = '4px solid #DC2626';
+  box.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 10px 0;">
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #DC2626; text-transform: uppercase;">QRIS 1x Pakai Kedaluwarsa</div>
+        <h3 style="font-family: var(--font-display); font-size: 18px; color: #991B1B; margin: 4px 0;">Waktu Pembayaran Habis</h3>
+        <p style="font-size: 13px; color: #7F1D1D; margin: 0;">QR code sudah ditutup agar tidak terjadi pembayaran ganda. Silakan generate QRIS baru.</p>
+      </div>
+      <button class="btn btn-secondary" onclick="closeInstructionBox()">Tutup</button>
+    </div>
+  `;
 }
 
 /**
  * 5-Second Real-Time Polling Engine
  */
-function startRealtimePolling(intentId) {
+function startRealtimePolling(intentId, expiresAtIso) {
   if (activePollingTimer) {
     clearInterval(activePollingTimer);
+  }
+  if (activeQrisCountdownTimer) {
+    clearInterval(activeQrisCountdownTimer);
+    activeQrisCountdownTimer = null;
+  }
+
+  if (expiresAtIso) {
+    const expiryMs = new Date(expiresAtIso).getTime();
+    activeQrisCountdownTimer = setInterval(() => {
+      const expEl = document.getElementById('alumniQrisExpiryLabel');
+      const remSec = Math.max(0, Math.floor((expiryMs - Date.now()) / 1000));
+      if (expEl) {
+        const mm = String(Math.floor(remSec / 60)).padStart(2, '0');
+        const ss = String(remSec % 60).padStart(2, '0');
+        expEl.innerText = `Sisa waktu pembayaran 1x pakai: ${mm}:${ss}`;
+      }
+      if (remSec <= 0) {
+        handleAlumniQrisExpired_();
+      }
+    }, 1000);
   }
 
   let secondsLeft = 5;
@@ -765,10 +818,16 @@ function startRealtimePolling(intentId) {
         });
 
         if (check.status === 'ok' && check.intent_status === 'MATCHED') {
-          // STOP polling and display success banner
+          // STOP polling and display success banner (also wipes QR image immediately)
           clearInterval(activePollingTimer);
           activePollingTimer = null;
+          if (activeQrisCountdownTimer) {
+            clearInterval(activeQrisCountdownTimer);
+            activeQrisCountdownTimer = null;
+          }
           handlePaymentSuccess(intentId);
+        } else if (check.status === 'ok' && check.intent_status === 'EXPIRED') {
+          handleAlumniQrisExpired_();
         }
       } catch (err) {
         console.warn('[POLLING-ERR]', err);

@@ -237,6 +237,25 @@ function getActivePendingAmountsForBank_(intentSheet, bankName) {
 }
 
 /**
+ * Computes expiration timestamp for an intent; QRIS single-use intents expire in 15 minutes
+ * by default so active unique codes recycle promptly and old QR codes cannot be reused.
+ */
+function computeIntentExpiry_(now, channel) {
+  const windowHours = parseInt(getConfig_('MATCH_WINDOW_HOURS') || '24', 10) || 24;
+  if (channel === 'QRIS_SEABANK') {
+    const qrisMins = parseInt(getSecureConfig_('QRIS_EXPIRY_MINUTES', true) || '15', 10) || 15;
+    return {
+      windowHours: windowHours,
+      expiresAt: new Date(now.getTime() + qrisMins * 60 * 1000)
+    };
+  }
+  return {
+    windowHours: windowHours,
+    expiresAt: new Date(now.getTime() + windowHours * 60 * 60 * 1000)
+  };
+}
+
+/**
  * Checks optional client_request_id in ScriptCache inside LockService to deduplicate double-submits.
  */
 function checkIntentIdempotencyCache_(scopeKey, clientRequestId) {
@@ -325,8 +344,9 @@ function createDonationIntent(idToken, data) {
     }
 
     const now = new Date();
-    const windowHours = parseInt(getConfig_('MATCH_WINDOW_HOURS') || '24', 10) || 24;
-    const expiresAt = new Date(now.getTime() + windowHours * 60 * 60 * 1000);
+    const expiryInfo = computeIntentExpiry_(now, channel);
+    const windowHours = expiryInfo.windowHours;
+    const expiresAt = expiryInfo.expiresAt;
     const intentId = 'INT_' + Utilities.getUuid().substring(0, 8);
     const orderId = channel === 'MIDTRANS_SNAP' ? formatMidtransOrderId(refCode, intentId) : '';
     const donorType = userRole === 'GUEST' ? 'GUEST' : 'ALUMNI';
@@ -706,8 +726,9 @@ function createGuestDonationIntent(data) {
     const proofHash = clientReqId && rawProof ? computeIdempotencyProofHash_(clientReqId, rawProof) : '';
 
     const now = new Date();
-    const windowHours = parseInt(getConfig_('MATCH_WINDOW_HOURS') || '24', 10) || 24;
-    const expiresAt = new Date(now.getTime() + windowHours * 60 * 60 * 1000);
+    const expiryInfo = computeIntentExpiry_(now, clean.payment_channel);
+    const windowHours = expiryInfo.windowHours;
+    const expiresAt = expiryInfo.expiresAt;
     const ttlDays = parseInt(getSecureConfig_('GUEST_RECEIPT_TTL_DAYS', true) || '30', 10) || 30;
     const tokenExpiresAt = new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
     const orderId = clean.payment_channel === 'MIDTRANS_SNAP' ? formatMidtransOrderId(refCode, intentId) : '';
@@ -1010,11 +1031,21 @@ function checkIntentStatus(idToken, intentId, accessToken) {
 
       let intentStatus = String(data[i][hMap.status] || '').trim();
       let matchedTxId = String(data[i][hMap.matched_tx_id] || '').trim();
+      const expiresAtRaw = hMap.expires_at !== undefined ? String(data[i][hMap.expires_at] || '').trim() : '';
       const paymentChannel =
         hMap.payment_channel !== undefined ? String(data[i][hMap.payment_channel] || 'MANUAL_TRANSFER') : 'MANUAL_TRANSFER';
       const orderId =
         hMap.midtrans_order_id !== undefined ? String(data[i][hMap.midtrans_order_id] || '').trim() : '';
       let activeGatewayStatus = '';
+
+      // Automatically transition expired PENDING intents to EXPIRED so 1x QRIS cannot be matched late
+      if (intentStatus.toUpperCase() === 'PENDING' && expiresAtRaw) {
+        const expMs = new Date(expiresAtRaw).getTime();
+        if (!isNaN(expMs) && Date.now() > expMs) {
+          intentStatus = 'EXPIRED';
+          intentSheet.getRange(i + 1, hMap.status + 1).setValue('EXPIRED');
+        }
+      }
 
       // Dual-Mode Active Status Inquiry for PENDING Midtrans Snap intents (throttled >= 5s via last_inquiry_at)
       if (
@@ -1065,6 +1096,7 @@ function checkIntentStatus(idToken, intentId, accessToken) {
         payment_channel: paymentChannel,
         order_id: orderId,
         intent_status: intentStatus,
+        expires_at: expiresAtRaw,
         matched_tx_id: matchedTxId || null,
         tx_id: txSummary ? txSummary.tx_id : (matchedTxId || null),
         gateway_status: txSummary ? txSummary.gateway_status : (activeGatewayStatus || intentStatus),
